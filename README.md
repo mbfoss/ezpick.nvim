@@ -7,8 +7,9 @@ symbols and references, diagnostics, quickfix, keymaps, commands and more —
 behind a single `:Pick` command. It can optionally take over `vim.ui.select`,
 and other plugins can register their own sources.
 
-> **Requires Neovim ≥ 0.11.** No plugin dependencies. `files` and `live_grep`
-> use [ripgrep](https://github.com/BurntSushi/ripgrep) when it is on `$PATH`.
+> **Requires Neovim ≥ 0.11.** No plugin dependencies. `live_grep` requires
+> [ripgrep](https://github.com/BurntSushi/ripgrep) on `$PATH`; every other
+> source, `files` included, is pure Lua.
 
 ## Installation
 
