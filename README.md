@@ -1,0 +1,155 @@
+# ezpick.nvim
+
+A fast, dependency-free fuzzy picker for Neovim.
+
+ezpick ships a broad set of built-in sources — files, live grep, buffers, LSP
+symbols and references, diagnostics, quickfix, keymaps, commands and more —
+behind a single `:Pick` command. It can optionally take over `vim.ui.select`,
+and other plugins can register their own sources.
+
+> **Requires Neovim ≥ 0.11.** No plugin dependencies. `files` and `live_grep`
+> use [ripgrep](https://github.com/BurntSushi/ripgrep) when it is on `$PATH`.
+
+## Installation
+
+**lazy.nvim**
+
+```lua
+{
+  "mbfoss/ezpick.nvim",
+  config = function()
+    require("ezpick").setup()
+  end,
+}
+```
+
+**Built-in packages** (`:help packages`)
+
+```
+git clone https://github.com/mbfoss/ezpick.nvim \
+  ~/.config/nvim/pack/plugins/opt/ezpick.nvim
+```
+
+Then in your config:
+
+```lua
+vim.cmd.packadd("ezpick.nvim")
+require("ezpick").setup()
+```
+
+## Configuration
+
+`setup()` takes an optional table; every field has a default, so `setup()` with
+no arguments is valid.
+
+```lua
+require("ezpick").setup({
+  override_ui_select  = true, -- route vim.ui.select through the picker
+  auto_complete_flags = true, -- auto-open flag completion while typing
+})
+```
+
+## Usage
+
+Open a source with `:Pick`, which completes both source names and their flags:
+
+```vim
+:Pick files
+:Pick live_grep
+:Pick buffers
+```
+
+An extra argument seeds the initial query:
+
+```vim
+:Pick live_grep TODO
+```
+
+`:Pick` with no argument lists the available sources through `vim.ui.select`.
+
+### Built-in sources
+
+| Source | What it lists |
+| --- | --- |
+| `files` | Files under the cwd |
+| `config_files` | Files under `stdpath("config")` |
+| `recent_files` | The oldfiles list |
+| `live_grep` | ripgrep results, with optional search & replace |
+| `buffers` | Loaded buffers |
+| `windows` | Open windows |
+| `quickfix` / `loclist` | The quickfix or location list |
+| `jumplist` | The jump list |
+| `lsp_references` | References to the symbol under the cursor |
+| `document_symbols` | LSP symbols in the current buffer |
+| `document_diagnostics` | Diagnostics in the current buffer |
+| `workspace_diagnostics` | Diagnostics across the workspace |
+| `keymaps` | Mappings, with their source location |
+| `commands` | User and built-in commands |
+| `autocommands` | Registered autocommands |
+| `highlights` | Highlight groups |
+| `spell_suggest` | Spelling suggestions for the word under the cursor |
+
+`repeat_last` reopens the previous picker with its last query and cursor
+position, without re-running the source's setup step.
+
+### Keys
+
+Inside a picker, `g?` shows the full list:
+
+| Key | Action |
+| --- | --- |
+| `<CR>` | Confirm |
+| `<Esc>` | Close |
+| `<C-n>` / `<C-p>` | Next / previous item |
+| `<C-d>` / `<C-u>` | Scroll half a page |
+| `<C-j>` / `<C-k>` | Next / previous history entry |
+| `<C-q>` | Send results to the quickfix list |
+| `<C-r><C-w>` | Insert the original `<cword>` |
+
+### Query flags
+
+Sources can accept inline flags in the query. Boolean flags are written
+`is:<name>`, value flags `<name>:<value>`; wrap a value in `"` if it contains
+spaces. Completion opens as you type (disable with `auto_complete_flags`).
+
+`files` accepts `dir:`, `case:`, `is:fixed`, `is:glob`, `is:follow`,
+`is:hidden`. `live_grep` accepts `dir:`, `filter:`, `case:`, `replace:`,
+`is:regex`, `is:follow`, `is:hidden`, `is:no-ignore`.
+
+```
+:Pick files is:hidden dir:~/src
+:Pick live_grep is:regex filter:*.lua fn%s+%w+
+```
+
+## Registering your own source
+
+```lua
+require("ezpick").register("my_source", {
+  prompt     = "My source",
+  finder     = function(query, flags, fetch_opts, callback)
+    callback({ { label_chunks = { { "an item" } }, data = { ... } } })
+  end,
+  on_confirm = function(data) ... end,
+})
+```
+
+The spec may also be a function returning a spec, in which case it is built
+lazily on each open. See the `ezpick.PickerSpec` annotation in
+[`lua/ezpick/init.lua`](lua/ezpick/init.lua) for every field.
+
+## Highlight groups
+
+| Group | Links to |
+| --- | --- |
+| `EzPickMatch` | `Label` |
+| `EzPickPath` | `@namespace` |
+| `EzPickBufferIndicator` | `Special` |
+
+Filetype icons in the file picker come from
+[keystone.nvim](https://github.com/mbfoss/keystone.nvim) (`keystone.icons`,
+highlighted with its `KeystoneIcons*` groups) when that plugin is installed.
+Without it, rows are rendered without icons.
+
+## License
+
+[MIT](LICENSE). See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for third-party credits.
