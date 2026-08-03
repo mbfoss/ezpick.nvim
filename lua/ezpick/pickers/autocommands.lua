@@ -1,6 +1,7 @@
 local M = {}
 
 local pickertools = require("ezpick.base.pickertools")
+local ui          = require("ezpick.util.ui")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
@@ -9,8 +10,48 @@ local FLAGS = {
     { name = "pat",   type = "value", multi = true, desc = "filter by pattern"    },
 }
 
+---Where an autocommand was declared. A Lua callback carries its own chunk name
+---and line, so `debug.getinfo` answers directly; anything defined in Vimscript
+---has to be asked of `:verbose autocmd`, which reports "Last set from <file>
+---line <n>". Between them that is all the source information Neovim exposes —
+---an autocommand with neither cannot be located at all.
 ---@param ac vim.api.keyset.get_autocmds.ret
-local function format_preview(ac)
+---@return {filepath:string, lnum:integer}?
+local function find_declaration(ac)
+    if type(ac.callback) == "function" then
+        local info = debug.getinfo(ac.callback, "S")
+        -- A chunk read from a file names itself "@/path/to/file.lua"; one built
+        -- from a string (`:lua`, `luaeval`) has no file to open.
+        if info and info.source and info.source:sub(1, 1) == "@" then
+            return { filepath = info.source:sub(2), lnum = math.max(info.linedefined, 1) }
+        end
+        return nil
+    end
+
+    local parts = { "verbose autocmd" }
+    if ac.group_name and ac.group_name ~= "" then table.insert(parts, ac.group_name) end
+    table.insert(parts, ac.event)
+    table.insert(parts, (ac.pattern and ac.pattern ~= "") and ac.pattern or "*")
+
+    -- Patterns come from the user's config and may hold anything, so the
+    -- assembled Ex command is not guaranteed to parse.
+    local ok, out = pcall(vim.fn.execute, table.concat(parts, " "), "silent")
+    if not ok or type(out) ~= "string" then return nil end
+
+    -- Line by line: the query can still match several autocommands, and a
+    -- pattern spanning the whole output would report the last one's source.
+    for line in out:gmatch("[^\n]+") do
+        local file, lnum = line:match("Last set from (.*) line (%d+)")
+        if file then
+            return { filepath = vim.fs.normalize(file), lnum = tonumber(lnum) }
+        end
+    end
+    return nil
+end
+
+---@param ac vim.api.keyset.get_autocmds.ret
+---@param decl {filepath:string, lnum:integer}?
+local function format_preview(ac, decl)
     local function fmt(val)
         if val == nil then return nil end
         if type(val) == "table"   then return table.concat(val, ", ") end
@@ -42,14 +83,16 @@ local function format_preview(ac)
     if ac.command and ac.command ~= "" then
         vim.list_extend(lines, vim.split(ac.command, "\n"))
     elseif ac.callback then
-        local info = debug.getinfo(ac.callback, "S")
         table.insert(lines, "- Type: Lua callback")
-        if info then
-            if info.short_src   then table.insert(lines, string.format("- Source: `%s`", info.short_src)) end
-            if info.linedefined then table.insert(lines, string.format("- Line: %d",     info.linedefined)) end
-        end
     else
         table.insert(lines, "_No action defined_")
+    end
+
+    table.insert(lines, "")
+    if decl then
+        table.insert(lines, string.format("Declared in `%s` line %d", decl.filepath, decl.lnum))
+    else
+        table.insert(lines, "_Declaration site unknown_")
     end
 
     return table.concat(lines, "\n")
@@ -62,6 +105,23 @@ function M.spec()
     if vim.tbl_isempty(entries) then
         vim.notify("No autocommands found", vim.log.levels.WARN)
         return nil
+    end
+
+    -- Resolving a declaration shells out to `:verbose autocmd`, and the preview
+    -- asks for one on every cursor move, so each answer is kept next to the
+    -- entry that produced it. The cache lives and dies with this picker session.
+    ---@type table<table, {filepath:string, lnum:integer}|false>
+    local declarations = {}
+
+    ---@param ac vim.api.keyset.get_autocmds.ret
+    ---@return {filepath:string, lnum:integer}?
+    local function declaration(ac)
+        local cached = declarations[ac]
+        if cached == nil then
+            cached           = find_declaration(ac) or false
+            declarations[ac] = cached
+        end
+        return cached or nil
     end
 
     return {
@@ -116,15 +176,22 @@ function M.spec()
             callback(items)
         end,
         previewer = function(data, _, callback)
-            callback({ content = format_preview(data.ac) })
+            callback({ content = format_preview(data.ac, declaration(data.ac)) })
             return function() end
         end,
-        on_confirm = function(item)
-            if not item then return end
-            vim.notify(
-                string.format("Autocmd: %s [%s]", item.command, item.event),
-                vim.log.levels.INFO
-            )
+        on_confirm = function(data)
+            if not data then return end
+            local decl = declaration(data.ac)
+            if not decl then
+                vim.notify(
+                    string.format("No declaration site recorded for %s %s",
+                        data.ac.event,
+                        (data.ac.pattern and data.ac.pattern ~= "") and data.ac.pattern or "*"),
+                    vim.log.levels.WARN
+                )
+                return
+            end
+            ui.smart_open_file(decl.filepath, decl.lnum, 0)
         end,
     }
 end
