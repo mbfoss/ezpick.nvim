@@ -76,19 +76,37 @@ An extra argument seeds the initial query:
 | `config_files` | Files under `stdpath("config")` |
 | `recent_files` | The oldfiles list |
 | `live_grep` | ripgrep results, with optional search & replace |
+| `buffer_lines` | Non-blank lines of the current buffer |
 | `buffers` | Loaded buffers |
 | `windows` | Open windows |
 | `quickfix` / `loclist` | The quickfix or location list |
 | `jumplist` | The jump list |
+| `marks` | Buffer-local and global marks |
 | `lsp_references` | References to the symbol under the cursor |
+| `lsp_definitions` | Definitions of the symbol under the cursor |
+| `lsp_declarations` | Declarations of the symbol under the cursor |
+| `lsp_implementations` | Implementations of the symbol under the cursor |
+| `lsp_type_definitions` | Type definitions of the symbol under the cursor |
 | `document_symbols` | LSP symbols in the current buffer |
+| `workspace_symbols` | LSP symbols across the workspace, queried live |
 | `document_diagnostics` | Diagnostics in the current buffer |
 | `workspace_diagnostics` | Diagnostics across the workspace |
 | `keymaps` | Mappings, with their source location |
 | `commands` | User and built-in commands |
+| `command_history` / `search_history` | `:` and `/` history, newest first |
 | `autocommands` | Registered autocommands |
 | `highlights` | Highlight groups |
+| `colorschemes` | Installed colorschemes, applied as you move |
+| `registers` | Register contents |
+| `help_tags` | `:help` tags from the runtimepath |
 | `spell_suggest` | Spelling suggestions for the word under the cursor |
+
+The four location sources (`lsp_definitions`, `lsp_declarations`,
+`lsp_implementations`, `lsp_type_definitions`) jump straight to their target when
+the server answers with exactly one. `colorschemes` applies each scheme as the
+cursor moves over it and restores the original one if the picker is closed
+without a choice. `command_history` and `search_history` put the chosen entry
+back on the command line unexecuted, ready to edit.
 
 `repeat_last` reopens the previous picker with its last query and cursor
 position, without re-running the source's setup step.
@@ -119,7 +137,10 @@ otherwise look like a flag.
 
 `files` accepts `dir:`, `case:`, `is:fixed`, `is:glob`, `is:follow`,
 `is:hidden`. `live_grep` accepts `dir:`, `filter:`, `case:`, `replace:`,
-`is:regex`, `is:follow`, `is:hidden`, `is:no-ignore`.
+`is:regex`, `is:follow`, `is:hidden`, `is:no-ignore`. `marks` accepts
+`is:global` and `is:buffer`, `registers` accepts `is:empty`, and the symbol
+sources accept one boolean per LSP symbol kind (`is:Function`, `is:Class`, …),
+several of which are OR'd together.
 
 ```
 :Pick files is:hidden dir:~/src

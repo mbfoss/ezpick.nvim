@@ -67,18 +67,31 @@ for _, name in ipairs(SYMBOL_KINDS) do
     })
 end
 
+---@class ezpick.lsp.LocationsOpts
+---@field method string LSP request method, e.g. "textDocument/definition"
+---@field prompt string
+---@field include_declaration boolean? Send `context.includeDeclaration` (references only).
+---@field jump_single boolean? Jump straight to the location when the request yields exactly one.
+
+---A picker over any request that answers with locations: references,
+---definitions, declarations, implementations and type definitions all return
+---`Location`, `Location[]` or `LocationLink[]`, so they differ only in the
+---method sent and how a single result is treated.
+---@param opts ezpick.lsp.LocationsOpts
 ---@return ezpick.PickerSpec
-function M.references_spec()
+local function locations_spec(opts)
     local params = vim.lsp.util.make_position_params(0, "utf-8")
-    ---@diagnostic disable-next-line: inject-field
-    params.context = { includeDeclaration = true }
+    if opts.include_declaration then
+        ---@diagnostic disable-next-line: inject-field
+        params.context = { includeDeclaration = true }
+    end
 
     return {
-        prompt          = "LSP References",
+        prompt          = opts.prompt,
         flags           = REF_FLAGS,
         enable_preview  = true,
         setup           = function(callback)
-            local action = "textDocument/references"
+            local action = opts.method
             vim.lsp.buf_request_all(0, action, params, function(results_per_client)
                 local lsp_items = {}
                 local errors    = {}
@@ -96,7 +109,17 @@ function M.references_spec()
                     vim.notify(action .. " : " .. err.message, vim.log.levels.ERROR)
                 end
                 if vim.tbl_isempty(lsp_items) then
-                    vim.notify("No LSP references found")
+                    vim.notify("No " .. opts.prompt .. " found")
+                    callback(nil)
+                    return
+                end
+                -- A lone definition is what the user asked for; showing a
+                -- one-entry picker for it would just add a keystroke.
+                if opts.jump_single and #lsp_items == 1 then
+                    local target = lsp_items[1]
+                    vim.schedule(function()
+                        ui.smart_open_file(target.filename, target.lnum, target.col - 1)
+                    end)
                     callback(nil)
                     return
                 end
@@ -146,6 +169,51 @@ function M.references_spec()
             if data then ui.smart_open_file(data.filepath, data.lnum, data.col) end
         end,
     }
+end
+
+---@return ezpick.PickerSpec
+function M.references_spec()
+    return locations_spec({
+        method              = "textDocument/references",
+        prompt              = "LSP References",
+        include_declaration = true,
+    })
+end
+
+---@return ezpick.PickerSpec
+function M.definitions_spec()
+    return locations_spec({
+        method      = "textDocument/definition",
+        prompt      = "LSP Definitions",
+        jump_single = true,
+    })
+end
+
+---@return ezpick.PickerSpec
+function M.declarations_spec()
+    return locations_spec({
+        method      = "textDocument/declaration",
+        prompt      = "LSP Declarations",
+        jump_single = true,
+    })
+end
+
+---@return ezpick.PickerSpec
+function M.implementations_spec()
+    return locations_spec({
+        method      = "textDocument/implementation",
+        prompt      = "LSP Implementations",
+        jump_single = true,
+    })
+end
+
+---@return ezpick.PickerSpec
+function M.type_definitions_spec()
+    return locations_spec({
+        method      = "textDocument/typeDefinition",
+        prompt      = "LSP Type Definitions",
+        jump_single = true,
+    })
 end
 
 ---@param opts {kinds:string[]?,prompt:string?}?
@@ -244,6 +312,92 @@ function M.document_symbols_spec(opts)
         end,
         on_confirm     = function(data)
             if data then vim.api.nvim_win_set_cursor(0, { data.lnum, data.col }) end
+        end,
+    }
+end
+
+---Symbols across the whole workspace. Unlike every other source the query is
+---not matched locally: each keystroke is forwarded to the server as the
+---`workspace/symbol` query and the previous request is cancelled, since only
+---the server knows what is out there. `match_label` is still run over the
+---returned names, purely to highlight the part that matched.
+---@return ezpick.PickerSpec?
+function M.workspace_symbols_spec()
+    if vim.tbl_isempty(vim.lsp.get_clients({ bufnr = 0, method = "workspace/symbol" })) then
+        vim.notify("No LSP client supports workspace/symbol", vim.log.levels.WARN)
+        return nil
+    end
+
+    return {
+        prompt         = "Workspace Symbols",
+        flags          = SYMBOL_FLAGS,
+        enable_preview = true,
+        finder         = function(query, flags, fetch_opts, callback)
+            local flag_kinds = {}
+            local any_kind   = false
+            for _, name in ipairs(SYMBOL_KINDS) do
+                if flags[name] then
+                    flag_kinds[name] = true
+                    any_kind         = true
+                end
+            end
+
+            local cancelled  = false
+            local cancel_all = vim.lsp.buf_request_all(0, "workspace/symbol", { query = query },
+                function(results_per_client)
+                    if cancelled then return end
+
+                    local items = {}
+                    for _, result_or_error in pairs(results_per_client) do
+                        for _, sym in ipairs(result_or_error.result or {}) do
+                            local kind = kind_to_string(sym.kind)
+                            if any_kind and not flag_kinds[kind] then goto continue end
+
+                            local location = sym.location
+                            if not location or not location.uri then goto continue end
+
+                            -- A 3.17 server may answer with a location carrying no
+                            -- range (to be filled in by workspaceSymbol/resolve);
+                            -- point at the top of the file in that case.
+                            local range    = location.range
+                            local filepath = vim.uri_to_fname(location.uri)
+                            local match    = pickertools.match_label(sym.name, query)
+                                or { chunks = pickertools.highlight_chunks(sym.name) }
+
+                            local chunks   = match.chunks
+                            table.insert(chunks, { (" (%s)"):format(kind), "Comment" })
+                            if sym.containerName and sym.containerName ~= "" then
+                                table.insert(chunks, { "  " .. sym.containerName, "Comment" })
+                            end
+
+                            local lnum = range and range.start.line + 1 or 1
+                            local loc  = fsutil.smart_crop_path(
+                                ("%s:%d"):format(fsutil.get_relative_path(filepath) or filepath, lnum),
+                                fetch_opts.list_width)
+
+                            ---@type ezpick.Picker.Item
+                            table.insert(items, {
+                                label_chunks = chunks,
+                                virt_line    = { { loc, "EzPickPath" } },
+                                data         = {
+                                    filepath = filepath,
+                                    lnum     = lnum,
+                                    col      = range and range.start.character or 0,
+                                },
+                            })
+                            ::continue::
+                        end
+                    end
+                    callback(items)
+                end)
+
+            return function()
+                cancelled = true
+                if cancel_all then cancel_all() end
+            end
+        end,
+        on_confirm     = function(data)
+            if data then ui.smart_open_file(data.filepath, data.lnum, data.col) end
         end,
     }
 end

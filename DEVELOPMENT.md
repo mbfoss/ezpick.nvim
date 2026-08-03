@@ -46,8 +46,10 @@ tests/                   plenary busted specs
   fetch loop. Everything user-visible happens here.
 - **`pickertools.lua`** — matching and highlighting helpers shared by sources:
   `match_label` (fuzzy subsequence + highlight chunks), `match_globs` (rg-style
-  glob matching), and `make_history_provider`, which persists per-source query
-  history under `stdpath("data")/ezpick/pickhist.<name>.txt`.
+  glob matching), the `file_preview` / `buffer_preview` loaders (the latter
+  previews `data.bufnr` when that buffer is loaded and falls back to the file on
+  disk), and `make_history_provider`, which persists per-source query history
+  under `stdpath("data")/ezpick/pickhist.<name>.txt`.
 - **`queryflags.lua`** — parses inline `is:<flag>` / `<flag>:<value>` tokens out
   of the query, and drives flag completion. Values containing spaces are
   `"`-quoted; those quoting rules are local to the query line. A standalone `--`
@@ -69,6 +71,15 @@ opened. Keep `setup()` cheap and defer heavy work to first use.
 A `finder` may return a cancel function; the engine calls it when the query
 changes or the picker closes, so long-running work (rg, LSP requests) must be
 cancellable.
+
+A source can decline to open twice over: its spec builder may return `nil` (no
+marks are set, no LSP client answers `workspace/symbol`), and an async `setup`
+may call back with `nil` data. The LSP location sources use the latter to jump
+straight to a lone result instead of showing a one-row picker.
+
+`on_confirm` is called on *every* close, with `nil` when the picker was
+dismissed — that is where a source undoes anything it did while previewing, as
+`colorschemes` does when it restores the original scheme.
 
 ### Shared toolkit (`util`)
 

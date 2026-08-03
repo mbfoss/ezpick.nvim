@@ -157,13 +157,21 @@ function M.register(name, spec)
     require("ezpick.registry").register(name, spec)
 end
 
+--- Define ezpick's own highlight groups, as defaults so a colorscheme can
+--- override them. `:colorscheme` clears every group, so anything that switches
+--- schemes while a picker is open (the `colorschemes` source) has to call this
+--- again afterwards.
+function M.apply_highlights()
+    vim.api.nvim_set_hl(0, "EzPickMatch", { default = true, link = "Label" })
+    vim.api.nvim_set_hl(0, "EzPickPath", { default = true, link = "@namespace" })
+    vim.api.nvim_set_hl(0, "EzPickBufferIndicator", { default = true, link = "Special" })
+end
+
 ---@param opts ezpick.Config?
 function M.setup(opts)
     M.config = vim.tbl_deep_extend("force", _get_default_config(), opts or {})
 
-    vim.api.nvim_set_hl(0, "EzPickMatch", { default = true, link = "Label" })
-    vim.api.nvim_set_hl(0, "EzPickPath", { default = true, link = "@namespace" })
-    vim.api.nvim_set_hl(0, "EzPickBufferIndicator", { default = true, link = "Special" })
+    M.apply_highlights()
 
     vim.api.nvim_create_user_command("Pick", function(cmd_opts)
         local picker_type   = cmd_opts.fargs[1]

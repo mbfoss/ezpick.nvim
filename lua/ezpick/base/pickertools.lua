@@ -312,6 +312,23 @@ function M.file_preview(data, _, callback)
     end
 end
 
+--- Preview the live buffer `data.bufnr` when it is loaded: the previewed text is
+--- then the in-memory one (unsaved edits included) and it arrives with whatever
+--- highlighting is already attached to that buffer. Entries with no live buffer
+--- fall back to the on-disk `file_preview`.
+---@type ezpick.Picker.AsyncPreviewLoader
+function M.buffer_preview(data, opts, callback)
+    local bufnr = data.bufnr
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
+        callback({
+            bufnr = bufnr,
+            pos   = data.lnum and { data.lnum, data.col or 0 } or nil,
+        })
+        return
+    end
+    return M.file_preview(data, opts, callback)
+end
+
 ---@param name string
 ---@param opts {max_entries:number?}?
 ---@return ezpick.Picker.QueryHistoryProvider

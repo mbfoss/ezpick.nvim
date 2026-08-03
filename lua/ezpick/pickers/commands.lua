@@ -1,6 +1,7 @@
 local M = {}
 
 local pickertools = require("ezpick.base.pickertools")
+local helptags    = require("ezpick.pickers.helptags")
 
 --- A command entry: the raw info from `nvim_get_commands` (under `info`) tagged
 --- with the source flags this picker tracks.  `nvim_get_commands` never returns
@@ -81,30 +82,6 @@ local function collect_commands()
             or { is_builtin = true, info = { name = name, definition = descs[name] } }
     end
     return entries
-end
-
---- Index of `:help` tags -> { help file, in-file anchor }, parsed from the
---- `doc/tags` files across the runtimepath (the same index `:help` consults).
---- Each line reads `tag<tab>file<tab>/*tag*`; the anchor is the address with its
---- leading `/` dropped (`/*:write*` -> `*:write*`), searched for literally since
---- the surrounding `*` make it unique.  Rebuilt on each picker open rather than
---- memoised, so nothing is retained in module memory between invocations.
----@return table<string, { file: string, anchor: string }>
-local function help_tag_index()
-    local tags = {}
-    for _, tagfile in ipairs(vim.api.nvim_get_runtime_file("doc/tags", true)) do
-        local dir = vim.fs.dirname(tagfile)
-        local ok, lines = pcall(vim.fn.readfile, tagfile)
-        if ok then
-            for _, line in ipairs(lines) do
-                local tag, rel, addr = line:match("^([^\t]+)\t([^\t]+)\t(.+)$")
-                if tag then
-                    tags[tag] = { file = vim.fs.joinpath(dir, rel), anchor = (addr:gsub("^/", "")) }
-                end
-            end
-        end
-    end
-    return tags
 end
 
 --- Extract just the block documenting `name` from a full help file: from the
@@ -252,7 +229,7 @@ function M.spec()
         prompt         = "Commands",
         flags          = FLAGS,
         enable_preview = true,
-        previewer      = make_help_previewer(help_tag_index(), command_names),
+        previewer      = make_help_previewer(helptags.tag_index(), command_names),
         finder         = function(query, flags, _, callback)
             local items = {}
             for _, cmd in ipairs(entries) do
