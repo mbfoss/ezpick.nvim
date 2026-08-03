@@ -63,9 +63,15 @@ describe("picker completefunc", function()
     end)
 
     it("keeps a query word from reaching the flag list", function()
-        local startcol, words = complete("hello --fixed wor", "wor")
-        assert.are.equal(14, startcol)
-        assert.are.same({}, words)
+        -- A bare word in the query is text, not a flag being typed, so there is
+        -- nothing to complete: -3 cancels silently and leaves completion mode,
+        -- which is why this one cannot go through `complete`.
+        set_prompt("hello --fixed wor")
+        assert.are.equal(-3, picker._flag_completefunc(1, ""))
+
+        -- And should Vim ask anyway, the candidate list stays empty.
+        set_prompt("hello --fixed ")
+        assert.are.same({}, picker._flag_completefunc(0, "wor").words)
     end)
 
     it("matches a quoted candidate against an unquoted leader", function()
