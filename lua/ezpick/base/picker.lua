@@ -396,7 +396,7 @@ function Picker:apply_prompt()
 	end
 end
 
---- Fire flag completion (the completefunc, via <C-x><C-u>) while typing so the
+--- Fire flag completion (the omnifunc, via <C-x><C-o>) while typing so the
 --- menu appears without pressing <C-Space>. Only triggers inside an in-progress
 --- flag (a dashed word, or a value slot after "--key"), never on query text.
 ---@return nil
@@ -418,7 +418,7 @@ function Picker:maybe_autocomplete()
 	if not queryflags.get_completions(flags, line, col, true) then return end
 
 	vim.api.nvim_feedkeys(
-		vim.api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", false
+		vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true), "n", false
 	)
 end
 
@@ -431,10 +431,20 @@ function Picker:setup_ui()
 	self:relayout(preview_action)
 
 	assert(self.pbuf ~= nil)
-	-- Expose flag completion as a completefunc so <C-x><C-u> (or any completion engine
-	-- on this buffer) can drive it. The flag schema is stashed on the buffer once here;
-	-- the completefunc computes candidates live from it, needing no picker or module state.
-	vim.bo[self.pbuf].completefunc = "v:lua.require'ezpick.base.picker'._flag_completefunc"
+	-- Expose flag completion on the prompt buffer so <C-x><C-o>, <C-x><C-u>, or any
+	-- completion engine on this buffer can drive it. The flag schema is stashed on the
+	-- buffer once here; the function computes candidates live from it, needing no picker
+	-- or module state.
+	--
+	-- The menu is driven through the *omnifunc*: while a menu is open Vim only keeps
+	-- completing on characters `ins_compl_accept_char()` accepts, and for user-defined
+	-- completion that is 'iskeyword' characters only. Flags are written with `-` and
+	-- values may open with `"`, neither of which is a keyword character, so under
+	-- <C-x><C-u> the second dash of "--" would dismiss the menu. Omni completion accepts
+	-- any printable non-blank character, which is exactly the alphabet of a flag.
+	local completefunc              = "v:lua.require'ezpick.base.picker'._flag_completefunc"
+	vim.bo[self.pbuf].omnifunc      = completefunc
+	vim.bo[self.pbuf].completefunc  = completefunc
 	vim.b[self.pbuf].ezpick_completion = { flags = self.opts.flags }
 	-- Hook into CompleteDone to restore highlights and trigger a fetch update
 	vim.api.nvim_create_autocmd("CompleteDone", {
@@ -1350,7 +1360,7 @@ function Picker:setup_input()
 		vim.keymap.set({ "n", "i" }, "<C-q>", function() self:send_to_qf() end, pbuf_key_opts)
 
 		vim.keymap.set("i", "<C-Space>", function()
-			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-u>", true, false, true), "n", false)
+			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true), "n", false)
 		end, pbuf_key_opts)
 
 		vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
@@ -1369,7 +1379,7 @@ function Picker:setup_input()
 	end
 end
 
---- Buffer-local 'completefunc' for picker flag completion. The flag schema is
+--- Buffer-local 'omnifunc'/'completefunc' for picker flag completion. The flag schema is
 --- read from a buffer variable set once at picker load; candidates are computed
 --- live from the current prompt line, so this function needs no picker reference
 --- or module-level state.
