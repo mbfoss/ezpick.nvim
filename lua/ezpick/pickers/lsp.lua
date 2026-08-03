@@ -216,6 +216,200 @@ function M.type_definitions_spec()
     })
 end
 
+---One end of a call relationship, flattened out of the protocol's nested
+---`CallHierarchyItem` / `fromRanges` shape.
+---@class ezpick.lsp.CallEntry
+---@field name string
+---@field kind string
+---@field filepath string
+---@field lnum integer
+---@field col integer
+
+---Incoming calls: `call.from` is the caller, and `fromRanges` are the call sites
+---*inside* that caller — one entry each, since landing on the call itself is
+---the point of asking who calls this.
+---@param call table CallHierarchyIncomingCall
+---@return ezpick.lsp.CallEntry[]
+local function incoming_entries(call)
+    local from = call.from
+    if not from or not from.uri then return {} end
+
+    local filepath = vim.uri_to_fname(from.uri)
+    local ranges   = call.fromRanges
+    if not ranges or #ranges == 0 then
+        ranges = { from.selectionRange or from.range }
+    end
+
+    local entries = {}
+    for _, range in ipairs(ranges) do
+        if range then
+            entries[#entries + 1] = {
+                name     = from.name,
+                kind     = kind_to_string(from.kind),
+                filepath = filepath,
+                lnum     = range.start.line + 1,
+                col      = range.start.character,
+            }
+        end
+    end
+    return entries
+end
+
+---Outgoing calls: `call.to` is the callee. Its `fromRanges` point back into the
+---buffer the cursor is already in, so they are dropped in favour of the callee's
+---own position — one entry per callee, landing on what it is you are calling.
+---@param call table CallHierarchyOutgoingCall
+---@return ezpick.lsp.CallEntry[]
+local function outgoing_entries(call)
+    local to = call.to
+    if not to or not to.uri then return {} end
+
+    local range = to.selectionRange or to.range
+    return { {
+        name     = to.name,
+        kind     = kind_to_string(to.kind),
+        filepath = vim.uri_to_fname(to.uri),
+        lnum     = range and range.start.line + 1 or 1,
+        col      = range and range.start.character or 0,
+    } }
+end
+
+---@class ezpick.lsp.CallsOpts
+---@field method string `callHierarchy/incomingCalls` or `callHierarchy/outgoingCalls`
+---@field prompt string
+---@field to_entries fun(call:table):ezpick.lsp.CallEntry[]
+
+---Call hierarchy takes two rounds: `textDocument/prepareCallHierarchy` turns the
+---cursor position into an item, and only then can the calls be asked for. The
+---item belongs to the client that produced it, so the second request goes back
+---to that same client rather than to the buffer at large.
+---@param opts ezpick.lsp.CallsOpts
+---@return ezpick.PickerSpec?
+local function calls_spec(opts)
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    if vim.tbl_isempty(vim.lsp.get_clients({ bufnr = bufnr, method = "textDocument/prepareCallHierarchy" })) then
+        vim.notify("No LSP client supports call hierarchy", vim.log.levels.WARN)
+        return nil
+    end
+
+    local params = vim.lsp.util.make_position_params(0, "utf-8")
+
+    return {
+        prompt         = opts.prompt,
+        flags          = REF_FLAGS,
+        enable_preview = true,
+        setup          = function(callback)
+            vim.lsp.buf_request_all(bufnr, "textDocument/prepareCallHierarchy", params, function(prepared)
+                ---@type {client:vim.lsp.Client, item:table}[]
+                local targets = {}
+                for client_id, result_or_error in pairs(prepared) do
+                    local item   = result_or_error.result and result_or_error.result[1]
+                    local client = vim.lsp.get_client_by_id(client_id)
+                    if item and client then
+                        targets[#targets + 1] = { client = client, item = item }
+                    end
+                end
+
+                if #targets == 0 then
+                    vim.notify("No call hierarchy for the symbol under the cursor")
+                    callback(nil)
+                    return
+                end
+
+                ---@type ezpick.lsp.CallEntry[]
+                local entries   = {}
+                local remaining = #targets
+
+                local function finish()
+                    if #entries == 0 then
+                        vim.notify("No " .. opts.prompt .. " found")
+                        callback(nil)
+                        return
+                    end
+                    table.sort(entries, function(a, b)
+                        if a.filepath ~= b.filepath then return a.filepath < b.filepath end
+                        if a.lnum ~= b.lnum then return a.lnum < b.lnum end
+                        return a.col < b.col
+                    end)
+                    callback({ entries = entries })
+                end
+
+                for _, target in ipairs(targets) do
+                    local sent = target.client:request(opts.method, { item = target.item },
+                        function(err, result)
+                            if err then
+                                vim.notify(opts.method .. " : " .. err.message, vim.log.levels.ERROR)
+                            end
+                            for _, call in ipairs(result or {}) do
+                                vim.list_extend(entries, opts.to_entries(call))
+                            end
+                            remaining = remaining - 1
+                            if remaining == 0 then finish() end
+                        end, bufnr)
+
+                    -- A client that refuses the request never calls back, so it
+                    -- has to be counted off here or the picker never opens.
+                    if not sent then
+                        remaining = remaining - 1
+                        if remaining == 0 then finish() end
+                    end
+                end
+            end)
+        end,
+        finder         = function(query, flags, fetch_opts, callback)
+            local items = {}
+            for _, entry in ipairs(fetch_opts.data.entries) do
+                local display_path = fsutil.get_relative_path(entry.filepath) or entry.filepath
+                if not pickertools.match_globs(flags["filter"] or {}, display_path, true) then goto continue end
+
+                local match = pickertools.match_label(entry.name, query)
+                if match then
+                    local chunks = match.chunks
+                    table.insert(chunks, { (" (%s)"):format(entry.kind), "Comment" })
+
+                    local loc = fsutil.smart_crop_path(
+                        ("%s:%d"):format(display_path, entry.lnum), fetch_opts.list_width)
+
+                    ---@type ezpick.Picker.Item
+                    table.insert(items, {
+                        label_chunks = chunks,
+                        virt_line    = { { loc, "EzPickPath" } },
+                        data         = {
+                            filepath = entry.filepath,
+                            lnum     = entry.lnum,
+                            col      = entry.col,
+                        },
+                    })
+                end
+                ::continue::
+            end
+            callback(items)
+        end,
+        on_confirm     = function(data)
+            if data then ui.smart_open_file(data.filepath, data.lnum, data.col) end
+        end,
+    }
+end
+
+---@return ezpick.PickerSpec?
+function M.incoming_calls_spec()
+    return calls_spec({
+        method     = "callHierarchy/incomingCalls",
+        prompt     = "LSP Incoming Calls",
+        to_entries = incoming_entries,
+    })
+end
+
+---@return ezpick.PickerSpec?
+function M.outgoing_calls_spec()
+    return calls_spec({
+        method     = "callHierarchy/outgoingCalls",
+        prompt     = "LSP Outgoing Calls",
+        to_entries = outgoing_entries,
+    })
+end
+
 ---@param opts {kinds:string[]?,prompt:string?}?
 ---@return ezpick.PickerSpec
 function M.document_symbols_spec(opts)

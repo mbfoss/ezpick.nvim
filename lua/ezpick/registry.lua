@@ -21,6 +21,8 @@ local _pickers = {
     lsp_declarations      = function() return require("ezpick.pickers.lsp").declarations_spec() end,
     lsp_implementations   = function() return require("ezpick.pickers.lsp").implementations_spec() end,
     lsp_type_definitions  = function() return require("ezpick.pickers.lsp").type_definitions_spec() end,
+    lsp_incoming_calls    = function() return require("ezpick.pickers.lsp").incoming_calls_spec() end,
+    lsp_outgoing_calls    = function() return require("ezpick.pickers.lsp").outgoing_calls_spec() end,
     lsp_document_symbols  = function() return require("ezpick.pickers.lsp").document_symbols_spec() end,
     lsp_workspace_symbols = function() return require("ezpick.pickers.lsp").workspace_symbols_spec() end,
     document_diagnostics  = function() return require("ezpick.pickers.diagnosics").spec({ bufnr = 0 }) end,

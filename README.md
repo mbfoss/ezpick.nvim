@@ -87,6 +87,8 @@ An extra argument seeds the initial query:
 | `lsp_declarations` | Declarations of the symbol under the cursor |
 | `lsp_implementations` | Implementations of the symbol under the cursor |
 | `lsp_type_definitions` | Type definitions of the symbol under the cursor |
+| `lsp_incoming_calls` | Call sites of the symbol under the cursor |
+| `lsp_outgoing_calls` | Functions the symbol under the cursor calls |
 | `lsp_document_symbols` | LSP symbols in the current buffer |
 | `lsp_workspace_symbols` | LSP symbols across the workspace |
 | `document_diagnostics` | Diagnostics in the current buffer |
@@ -105,7 +107,8 @@ The four location sources (`lsp_definitions`, `lsp_declarations`,
 `lsp_implementations`, `lsp_type_definitions`) jump straight to their target when
 the server answers with exactly one. `lsp_workspace_symbols` asks the server once
 with an empty query and filters the answer locally; servers that refuse an empty
-query return nothing. `colorschemes` applies each scheme as the cursor moves over
+query return nothing. `lsp_incoming_calls` lands on each call site inside the
+caller, while `lsp_outgoing_calls` lands on each callee's own definition. `colorschemes` applies each scheme as the cursor moves over
 it and restores the original one if the picker is closed without a choice.
 `command_history` and `search_history` put the chosen entry back on the command
 line unexecuted, ready to edit.
