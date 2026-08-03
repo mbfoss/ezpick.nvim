@@ -45,7 +45,7 @@ no arguments is valid.
 
 ```lua
 require("ezpick").setup({
-  override_ui_select  = true, -- route vim.ui.select through the picker
+  override_ui_select  = false, -- opt in to route vim.ui.select through the picker
   auto_complete_flags = true, -- auto-open flag completion while typing
 })
 ```

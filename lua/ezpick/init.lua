@@ -4,7 +4,8 @@ local M        = {}
 -- ezpick
 --
 -- A dependency-free fuzzy picker. `setup()` registers the `:Pick` command and
--- optionally routes `vim.ui.select` through the picker:
+-- leaves the rest of the editor alone; routing `vim.ui.select` through the
+-- picker replaces a global other plugins may also want, so it is opt-in:
 --
 --   require("ezpick").setup({ override_ui_select = true })
 --
@@ -13,7 +14,7 @@ local M        = {}
 -- ---------------------------------------------------------------------------
 
 ---@class ezpick.Config
----@field override_ui_select boolean?
+---@field override_ui_select boolean? Route `vim.ui.select` through the picker (default false).
 ---@field auto_complete_flags boolean? Auto-open flag completion while typing (default true).
 
 ---@class ezpick.PickerSpec
@@ -33,7 +34,7 @@ local M        = {}
 local function _get_default_config()
     ---@type ezpick.Config
     return {
-        override_ui_select  = true,
+        override_ui_select  = false,
         auto_complete_flags = true,
     }
 end
