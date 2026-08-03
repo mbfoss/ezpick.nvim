@@ -181,22 +181,36 @@ function M.setup(opts)
     end, {
         nargs    = "*",
         desc     = "Picker for files, grep etc...",
-        complete = function(arg_lead, cmd_line, _)
-            local registry = require("ezpick.registry")
-            local parts    = vim.split(cmd_line, "%s+", { trimempty = true })
-            if #parts <= 1 or (#parts == 2 and not cmd_line:match("%s$")) then
+        complete = function(arg_lead, cmd_line, cursor_pos)
+            local registry   = require("ezpick.registry")
+            local queryflags = require("ezpick.base.queryflags")
+            local before     = cmd_line:sub(1, cursor_pos)
+            local parts    = vim.split(before, "%s+", { trimempty = true })
+            if #parts <= 1 or (#parts == 2 and not before:match("%s$")) then
                 local keys = registry.keys()
                 table.insert(keys, "resume")
                 table.sort(keys)
                 return vim.tbl_filter(function(k) return vim.startswith(k, arg_lead) end, keys)
             end
+
             local flags = registry.get_flags(parts[2])
             if not flags then return {} end
+
+            -- Everything after the source name is the picker's query, so the same
+            -- flag parser that drives the prompt completes it here: flag names on
+            -- their own, values once a value flag is waiting for one.
+            local head  = before:match("^%s*%S+%s+%S+%s+") or ""
+            local query = before:sub(#head + 1)
+            local comps = queryflags.get_completions(flags, query, #query, false)
+            if not comps then return {} end
+
             local out = {}
-            for _, flag in ipairs(flags) do
-                table.insert(out, "--" .. flag.name)
+            for _, item in ipairs(comps.items) do
+                -- The cmdline replaces the whitespace-delimited word under the
+                -- cursor, so only candidates extending it can be offered.
+                if vim.startswith(item.word, arg_lead) then table.insert(out, item.word) end
             end
-            return vim.tbl_filter(function(v) return vim.startswith(v, arg_lead) end, out)
+            return out
         end,
     })
 

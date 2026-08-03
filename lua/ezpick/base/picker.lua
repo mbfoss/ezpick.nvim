@@ -17,6 +17,11 @@ local _NS_CONTENT        = vim.api.nvim_create_namespace("ezpick_PickerContent")
 local _NS_SPINNER        = vim.api.nvim_create_namespace("ezpick_PickerSpinner")
 local _NS_PREVIEW        = vim.api.nvim_create_namespace("ezpick_PickerPreview")
 
+-- Completion result carrying no candidates. `refresh = "always"` has to ride along
+-- even on the empty answer, or Vim stops asking and the menu cannot come back as
+-- the rest of the flag is typed.
+local _EMPTY_COMPLETION  = { words = {}, refresh = "always" }
+
 local _antiflicker_delay = 200
 local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Title"
 
@@ -451,7 +456,10 @@ function Picker:setup_ui()
 		buffer = self.pbuf,
 		callback = function()
 			-- Accepting an item fires TextChangedI; suppress its auto-trigger.
-			if next(vim.v.completed_item or {}) ~= nil then
+			-- A menu dismissed by a keystroke it cannot complete on (a space
+			-- ending a value) reports a stub item for the text typed so far, so
+			-- what marks a real choice is the `abbr` every item here carries.
+			if (vim.v.completed_item or {}).abbr ~= nil and vim.v.completed_item.abbr ~= "" then
 				self._suppress_autocomplete = true
 			end
 			self:apply_prompt()
@@ -1385,26 +1393,28 @@ end
 --- or module-level state.
 ---@param findstart 0|1
 ---@param base string
----@return integer|table
+---@return integer|table -- the 0-indexed start column, or a `complete-functions` dict
 function M._flag_completefunc(findstart, base)
 	local ctx   = vim.b.ezpick_completion
 	local flags = ctx and ctx.flags
 	if not flags or #flags == 0 then
-		return findstart == 1 and -3 or {}
+		return findstart == 1 and -3 or _EMPTY_COMPLETION
 	end
 
-	local line, col, completions
-	if findstart == 1 then
-		line        = vim.api.nvim_get_current_line()
-		col         = vim.api.nvim_win_get_cursor(0)[2]
-		completions = queryflags.get_completions(flags, line, col, false)
-	else
-		line        = base
-		col         = #base
-		completions = queryflags.get_completions(flags, line, col, false)
+	-- Candidates depend on the whole prompt line, not just `base`: "l" alone is a
+	-- bare word, but "--dir l" is a directory being named. On the second call Vim
+	-- has cut `base` out of the buffer and parked the cursor at its start, so the
+	-- line is put back together before parsing it.
+	local line = vim.api.nvim_get_current_line()
+	local col  = vim.api.nvim_win_get_cursor(0)[2]
+	if findstart == 0 then
+		line = line:sub(1, col) .. base .. line:sub(col + 1)
+		col  = col + #base
 	end
+
+	local completions = queryflags.get_completions(flags, line, col, false)
 	if not completions or #completions.items == 0 then
-		return findstart == 1 and -3 or {}
+		return findstart == 1 and -3 or _EMPTY_COMPLETION
 	end
 
 	-- get_completions returns a 1-indexed byte column; completefunc wants 0-indexed.
@@ -1421,7 +1431,7 @@ function M._flag_completefunc(findstart, base)
 			items[#items + 1] = item
 		end
 	end
-	return items
+	return { words = items, refresh = "always" }
 end
 
 --- Exposed for the test suite; `run_fetch` is the only caller in anger.
