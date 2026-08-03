@@ -194,11 +194,7 @@ function M.setup(opts)
             if not flags then return {} end
             local out = {}
             for _, flag in ipairs(flags) do
-                if flag.type == "boolean" then
-                    table.insert(out, "is:" .. flag.name)
-                else
-                    table.insert(out, flag.name .. ":")
-                end
+                table.insert(out, "--" .. flag.name)
             end
             return vim.tbl_filter(function(v) return vim.startswith(v, arg_lead) end, out)
         end,

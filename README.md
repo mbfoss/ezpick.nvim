@@ -133,24 +133,25 @@ Inside a picker, `g?` shows the full list:
 ### Query flags
 
 Sources can accept inline flags in the query. Boolean flags are written
-`is:<name>`, value flags `<name>:<value>`; wrap a value in `"` if it contains
-spaces. Completion opens as you type (disable with `auto_complete_flags`).
+`--<name>`, value flags `--<name> <value>`; a value flag takes the next token as
+its value, so wrap that value in `"` if it contains spaces. Completion opens as
+you type (disable with `auto_complete_flags`).
 
 Everything after a standalone `--` is taken as literal query text: no flags, no
 quoting, spacing kept as typed. Use it to search for something that would
 otherwise look like a flag.
 
-`files` accepts `dir:`, `case:`, `is:fixed`, `is:glob`, `is:follow`,
-`is:hidden`. `live_grep` accepts `dir:`, `filter:`, `case:`, `replace:`,
-`is:regex`, `is:follow`, `is:hidden`, `is:no-ignore`. `marks` accepts
-`is:global` and `is:buffer`, `registers` accepts `is:empty`, and the symbol
-sources accept one boolean per LSP symbol kind (`is:Function`, `is:Class`, …),
+`files` accepts `--dir`, `--case`, `--fixed`, `--glob`, `--follow`,
+`--hidden`. `live_grep` accepts `--dir`, `--filter`, `--case`, `--replace`,
+`--regex`, `--follow`, `--hidden`, `--no-ignore`. `marks` accepts
+`--global` and `--buffer`, `registers` accepts `--empty`, and the symbol
+sources accept one boolean per LSP symbol kind (`--Function`, `--Class`, …),
 several of which are OR'd together.
 
 ```
-:Pick files is:hidden dir:~/src
-:Pick live_grep is:regex filter:*.lua fn%s+%w+
-:Pick live_grep dir:~/src -- is:hidden   " searches for the text "is:hidden"
+:Pick files --hidden --dir ~/src
+:Pick live_grep --regex --filter *.lua fn%s+%w+
+:Pick live_grep --dir ~/src -- --hidden   " searches for the text "--hidden"
 ```
 
 ## Registering your own source

@@ -50,10 +50,11 @@ tests/                   plenary busted specs
   previews `data.bufnr` when that buffer is loaded and falls back to the file on
   disk), and `make_history_provider`, which persists per-source query history
   under `stdpath("data")/ezpick/pickhist.<name>.txt`.
-- **`queryflags.lua`** — parses inline `is:<flag>` / `<flag>:<value>` tokens out
-  of the query, and drives flag completion. Values containing spaces are
-  `"`-quoted; those quoting rules are local to the query line. A standalone `--`
-  ends the flagged section: the rest of the line is literal query text.
+- **`queryflags.lua`** — parses inline `--<flag>` / `--<flag> <value>` tokens out
+  of the query, and drives flag completion. A value flag takes the next token as
+  its value; values containing spaces are `"`-quoted; those quoting rules are
+  local to the query line. A standalone `--` ends the flagged section: the rest
+  of the line is literal query text.
 - **`layouts.lua`** — geometry for the list/preview floats.
 
 ### Sources

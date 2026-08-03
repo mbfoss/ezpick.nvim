@@ -101,7 +101,7 @@ describe("buffer_lines", function()
 end)
 
 describe("registers", function()
-    it("skips empty registers unless is:empty is set", function()
+    it("skips empty registers unless --empty is set", function()
         vim.fn.setreg("q", "")
         vim.fn.setreg("z", "picked up")
 

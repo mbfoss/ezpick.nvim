@@ -398,7 +398,7 @@ end
 
 --- Fire flag completion (the completefunc, via <C-x><C-u>) while typing so the
 --- menu appears without pressing <C-Space>. Only triggers inside an in-progress
---- flag (right after "key:"/"is:" or while typing a value), never on query text.
+--- flag (a dashed word, or a value slot after "--key"), never on query text.
 ---@return nil
 function Picker:maybe_autocomplete()
 	if self.closed or self.opts.auto_complete_flags == false then return end

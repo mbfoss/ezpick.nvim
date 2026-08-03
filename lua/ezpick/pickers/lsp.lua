@@ -55,8 +55,8 @@ local SYMBOL_KINDS = {
     "TypeParameter",
 }
 
--- One boolean flag per symbol kind, so kinds are selected as "is:Function
--- is:Class" rather than a single "kind:" value list. Several at once are OR'd.
+-- One boolean flag per symbol kind, so kinds are selected as "--Function
+-- --Class" rather than a single "--kind" value list. Several at once are OR'd.
 ---@type ezpick.queryflags.FlagDef[]
 local SYMBOL_FLAGS = {}
 for _, name in ipairs(SYMBOL_KINDS) do
@@ -476,7 +476,7 @@ function M.document_symbols_spec(opts)
         end,
         finder         = function(query, flags, fetch_opts, callback)
             local data       = fetch_opts.data
-            -- Kind booleans select a union: "is:Function is:Class" keeps both,
+            -- Kind booleans select a union: "--Function --Class" keeps both,
             -- none set keeps every kind.
             local flag_kinds = {}
             local any_kind   = false
