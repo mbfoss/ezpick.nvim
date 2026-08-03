@@ -5,6 +5,7 @@ local floatwin           = require("ezpick.util.floatwin")
 local layouts            = require("ezpick.base.layouts")
 local queryflags         = require("ezpick.base.queryflags")
 local pickertools        = require("ezpick.base.pickertools")
+local tbl_new            = require("table.new")
 
 ---@mod ezpick.picker
 ---@brief Floating async picker with fuzzy filtering and optional preview.
@@ -236,6 +237,7 @@ end
 --- The sort has to be stable, and `table.sort` is not: equal scores are the
 --- common case (glob matches all score 0), and without the index tiebreak those
 --- rows would reshuffle on every keystroke.
+---
 --- Sorts `items` in place and returns it.
 ---@param items ezpick.Picker.Item[]
 ---@return ezpick.Picker.Item[]
@@ -243,10 +245,7 @@ local function _rank_items(items)
 	local n = #items
 	if n < 2 then return items end
 
-	-- One pass records each item's source position for the tiebreak and answers
-	-- whether anything is scored at all; an unscored list is already in the
-	-- order its source produced, so it needs no sort.
-	local order  = {}
+	local order  = tbl_new(0, n)
 	local scored = false
 	for i = 1, n do
 		local item = items[i]
@@ -255,11 +254,6 @@ local function _rank_items(items)
 	end
 	if not scored then return items end
 
-	-- Score decides first, so the hash lookup into `order` costs nothing on the
-	-- common path — it happens only on a tie, not on every one of the O(n log n)
-	-- comparisons. Unequal scores are also the only place nil can matter: two
-	-- unscored items compare equal and fall through to source order, and a
-	-- single unscored one sorts last.
 	table.sort(items, function(a, b)
 		local sa, sb = a.score, b.score
 		if sa ~= sb then
