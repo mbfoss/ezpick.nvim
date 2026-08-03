@@ -19,11 +19,6 @@ local _NS_PREVIEW        = vim.api.nvim_create_namespace("ezpick_PickerPreview")
 local _antiflicker_delay = 200
 local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Title"
 
---- Sort key standing in for "this source did not score the item"; it sorts
---- below every real score, which are finite.
-local _NO_SCORE          = -math.huge
-
-
 ---@class ezpick.picker.ItemData
 ---@field filepath string?
 ---@field lnum number?
@@ -241,43 +236,40 @@ end
 --- The sort has to be stable, and `table.sort` is not: equal scores are the
 --- common case (glob matches all score 0), and without the index tiebreak those
 --- rows would reshuffle on every keystroke.
+--- Sorts `items` in place and returns it.
 ---@param items ezpick.Picker.Item[]
 ---@return ezpick.Picker.Item[]
 local function _rank_items(items)
 	local n = #items
 	if n < 2 then return items end
 
-	-- One pass builds both the index array to sort and a flat array of keys,
-	-- and settles the nil question up front: an unscored item takes -inf, so it
-	-- sorts last without the comparator ever testing for nil.
-	local keys   = {}
+	-- One pass records each item's source position for the tiebreak and answers
+	-- whether anything is scored at all; an unscored list is already in the
+	-- order its source produced, so it needs no sort.
 	local order  = {}
 	local scored = false
 	for i = 1, n do
-		local score = items[i].score
-		if score == nil then
-			score = _NO_SCORE
-		else
-			scored = true
-		end
-		keys[i]  = score
-		order[i] = i
+		local item = items[i]
+		order[item] = i
+		if item.score ~= nil then scored = true end
 	end
 	if not scored then return items end
 
-	-- The comparator runs O(n log n) times, so it reads keys straight out of a
-	-- flat array: one array index per side, rather than an array index plus a
-	-- hash lookup for `.score`. Ties fall back to position, since `table.sort`
-	-- is not stable and equal scores are the common case.
-	table.sort(order, function(ia, ib)
-		local a, b = keys[ia], keys[ib]
-		if a == b then return ia < ib end
-		return a > b
+	-- Score decides first, so the hash lookup into `order` costs nothing on the
+	-- common path — it happens only on a tie, not on every one of the O(n log n)
+	-- comparisons. Unequal scores are also the only place nil can matter: two
+	-- unscored items compare equal and fall through to source order, and a
+	-- single unscored one sorts last.
+	table.sort(items, function(a, b)
+		local sa, sb = a.score, b.score
+		if sa ~= sb then
+			if sa == nil then return false end
+			if sb == nil then return true end
+			return sa > sb
+		end
+		return order[a] < order[b]
 	end)
-
-	local ranked = {}
-	for i = 1, n do ranked[i] = items[order[i]] end
-	return ranked
+	return items
 end
 
 ---@param item ezpick.picker.ListItem
