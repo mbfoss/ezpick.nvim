@@ -15,7 +15,7 @@ local M = {}
 ---@field desc     string?    -- shown in the completion menu
 
 ---@class ezpick.queryflags.ParseResult
----@field query string  -- the literal query (all non-flag tokens and "query:" values, joined by space)
+---@field query string  -- the literal query (all non-flag tokens joined by space, followed by the raw text after "--")
 ---@field flags table   -- {[name] = true | string | string[]}
 ---@field error string? -- set when the query is malformed (e.g. an unclosed quote)
 
@@ -23,10 +23,8 @@ local M = {}
 ---@field startcol integer  -- 1-indexed column for vim.fn.complete()
 ---@field items    table[]
 
----The implicit flag every flagged query carries: its value is appended to the
----query as literal text instead of becoming a flag. Reserved -- a schema may
----not define a flag by this name.
-local _QUERY = "query"
+---Ends the flagged section of a query: everything after it is literal text.
+local _SEPARATOR = "--"
 
 ---`vim.fn.getcompletion()` types whose candidates are path fragments: a
 ---completed value is often only a prefix of what the user is after, so its
@@ -41,27 +39,7 @@ local _PATH_COMPLETE = {
     shellcmdline = true,
 }
 
----Add the implicit "query" flag to a schema. The name is reserved: a schema
----that defines it is a programming error, not a flag that shadows the literal.
 ---@param schema ezpick.queryflags.FlagDef[]
----@return ezpick.queryflags.FlagDef[]
-local function _augment(schema)
-    if #schema == 0 then return schema end
-    for _, def in ipairs(schema) do
-        assert(def.name ~= _QUERY, '"' .. _QUERY .. '" is a reserved flag name')
-    end
-
-    local out = vim.list_extend({}, schema)
-    out[#out + 1] = {
-        name  = _QUERY,
-        type  = "value",
-        multi = true,
-        desc  = "[literal text]",
-    }
-    return out
-end
-
----@param schema ezpick.queryflags.FlagDef[] -- already augmented
 ---@return table<string, ezpick.queryflags.FlagDef>
 local function _build_map(schema)
     local m = {}
@@ -71,15 +49,16 @@ end
 
 -- Syntax:
 --
---   <token> <token> ...
+--   <token> <token> ... [-- <literal text>]
 --
--- The input is a flat list of whitespace-separated tokens with no separator;
--- flags and query text may appear in any order. Each token is classified:
+-- Up to the optional "--" separator the input is a flat list of
+-- whitespace-separated tokens; flags and query text may appear in any order.
+-- Each token is classified:
 --   boolean flag:  "is:flagname" → flags.flagname = true  (matching a boolean def)
 --   value flag:    "key:value"   → flags.key = value      (or string[] if multi)
 --   anything else: query text
--- The query is every non-flag token (plus every "query:" value, see below)
--- joined back together with single spaces, in the order written.
+-- The query is every non-flag token joined back together with single spaces,
+-- in the order written, followed by the raw text after the separator.
 -- Boolean flags have no standalone form — "flagname" alone is always query
 -- text; the "is:" prefix is what distinguishes a flag from a query word.
 --
@@ -95,11 +74,14 @@ end
 -- unterminated quote is an error.
 --
 -- There is no escape character. A flag-looking string is searched for verbatim
--- by passing it through the implicit "query" flag -- a reserved name every
--- schema carries -- which appends its value to the query instead of setting a
--- flag:
---   'query:"is:fixed"'   → query text "is:fixed"
---   'query:"path:foo x"' → query text "path:foo x"
+-- by writing it after the "--" separator: a standalone "--" token ends the
+-- flagged section, and the rest of the line is literal query text -- no
+-- tokenizing, no flags, no quoting, whitespace kept as typed:
+--   'is:fixed -- is:fixed'   → flag fixed, query text "is:fixed"
+--   'foo -- path:a  "b" --'  → query text 'foo path:a  "b" --'
+-- Only the first standalone "--" separates; one inside a quoted value
+-- ('path:"a -- b"') or glued to other text ("--x") is ordinary content. The
+-- whitespace between the separator and the literal text is not part of it.
 
 ---@class ezpick.queryflags.Token
 ---@field text          string                         -- verbatim token text
@@ -204,6 +186,25 @@ local function _tokenize(str, defs)
     return tokens
 end
 
+---Tokenize up to the first standalone "--": the tokens before it carry the
+---flags, everything after it is literal text taken verbatim. A "--" that is
+---part of a quoted value or glued to other characters is not a separator.
+---@param str  string
+---@param defs table<string, ezpick.queryflags.FlagDef>
+---@return ezpick.queryflags.Token[] tokens, ezpick.queryflags.Token? separator, string? literal
+local function _split(str, defs)
+    local tokens = _tokenize(str, defs)
+
+    for i, token in ipairs(tokens) do
+        if token.text == _SEPARATOR and not token.quote then
+            local literal = (str:sub(token.finish + 1):gsub("^%s+", ""))
+            return vim.list_slice(tokens, 1, i - 1), token, literal
+        end
+    end
+
+    return tokens, nil, nil
+end
+
 -- Classify a single token against the flag schema. A value flag is "key:value" (key
 -- matching a value def; the value may be quoted); a boolean flag is "is:flagname"
 -- matching a boolean def. Anything else is query text.
@@ -236,10 +237,10 @@ end
 ---@param raw    string
 ---@return ezpick.queryflags.ParseResult
 function M.parse(schema, raw)
-    local defs   = _build_map(_augment(schema))
-    local flags  = {}
-    local tokens = _tokenize(raw, defs)
-    local parts  = {}
+    local defs               = _build_map(schema)
+    local flags              = {}
+    local tokens, _, literal = _split(raw, defs)
+    local parts              = {}
 
     for _, token in ipairs(tokens) do
         if token.quote and not token.quote.close then
@@ -249,11 +250,7 @@ function M.parse(schema, raw)
 
     for _, token in ipairs(tokens) do
         local kind, key, value = _classify(defs, token)
-        if kind == "value" and key == _QUERY then
-            -- the implicit "query" flag carries literal text: it joins the query
-            -- in the position it was written rather than becoming a flag.
-            if value and value ~= "" then parts[#parts + 1] = value end
-        elseif kind == "value" and key then
+        if kind == "value" and key then
             local def = defs[key]
             if value and (value ~= "" or def.allow_empty) then
                 if def.multi then
@@ -270,6 +267,10 @@ function M.parse(schema, raw)
         end
     end
 
+    -- Text after the separator is verbatim: it joins the query as a single
+    -- trailing chunk, keeping its own spacing.
+    if literal and literal ~= "" then parts[#parts + 1] = literal end
+
     return { query = table.concat(parts, " "), flags = flags }
 end
 
@@ -277,9 +278,9 @@ end
 ---@param raw    string
 ---@return {start:integer, finish:integer, hl:string}[]
 function M.highlight(schema, raw)
-    local defs   = _build_map(_augment(schema))
-    local hls    = {}
-    local tokens = _tokenize(raw, defs)
+    local defs                 = _build_map(schema)
+    local hls                  = {}
+    local tokens, separator, _ = _split(raw, defs)
 
     for _, token in ipairs(tokens) do
         local kind, _, value = _classify(defs, token)
@@ -315,6 +316,16 @@ function M.highlight(schema, raw)
         end
     end
 
+    -- The separator is syntax; what follows it is literal text and stays plain,
+    -- so a flag-looking word there visibly reads as an ordinary query word.
+    if separator then
+        table.insert(hls, {
+            start  = separator.start - 1,
+            finish = separator.finish,
+            hl     = "Delimiter",
+        })
+    end
+
     return hls
 end
 
@@ -327,10 +338,12 @@ function M.get_completions(schema, line, cursor_byte, auto)
     local char_after = line:sub(cursor_byte + 1, cursor_byte + 1)
     if char_after ~= "" and not char_after:match("%s") then return nil end
 
-    local list         = _augment(schema)
-    local defs         = _build_map(list)
-    local before       = line:sub(1, cursor_byte)
-    local tokens       = _tokenize(before, defs)
+    local defs              = _build_map(schema)
+    local before            = line:sub(1, cursor_byte)
+    local tokens, separator = _split(before, defs)
+
+    -- Past the separator every character is literal query text: nothing to complete.
+    if separator then return nil end
 
     local last         = tokens[#tokens]
     local word_start_1 = #before + 1
@@ -351,7 +364,7 @@ function M.get_completions(schema, line, cursor_byte, auto)
         -- Case 1: Inside an "is:<partial_boolean_flag>" block
         if prefix == "is" then
             local items = {}
-            for _, def in ipairs(list) do
+            for _, def in ipairs(schema) do
                 if def.type == "boolean" and vim.startswith(def.name, partial) then
                     table.insert(items, {
                         word = "is:" .. def.name,
@@ -418,7 +431,16 @@ function M.get_completions(schema, line, cursor_byte, auto)
         })
     end
 
-    for _, def in ipairs(list) do
+    -- The separator, once a "-" has been typed: everything after it is literal.
+    if vim.startswith(_SEPARATOR, current_word) and #current_word > 0 then
+        table.insert(items, {
+            word = _SEPARATOR,
+            abbr = _SEPARATOR,
+            menu = "[literal text]",
+        })
+    end
+
+    for _, def in ipairs(schema) do
         if def.type == "value" and vim.startswith(def.name, current_word) then
             table.insert(items, {
                 word = def.name .. ":",

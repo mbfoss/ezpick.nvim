@@ -50,7 +50,8 @@ tests/                   plenary busted specs
   history under `stdpath("data")/ezpick/pickhist.<name>.txt`.
 - **`queryflags.lua`** — parses inline `is:<flag>` / `<flag>:<value>` tokens out
   of the query, and drives flag completion. Values containing spaces are
-  `"`-quoted; those quoting rules are local to the query line.
+  `"`-quoted; those quoting rules are local to the query line. A standalone `--`
+  ends the flagged section: the rest of the line is literal query text.
 - **`layouts.lua`** — geometry for the list/preview floats.
 
 ### Sources

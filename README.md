@@ -113,6 +113,10 @@ Sources can accept inline flags in the query. Boolean flags are written
 `is:<name>`, value flags `<name>:<value>`; wrap a value in `"` if it contains
 spaces. Completion opens as you type (disable with `auto_complete_flags`).
 
+Everything after a standalone `--` is taken as literal query text: no flags, no
+quoting, spacing kept as typed. Use it to search for something that would
+otherwise look like a flag.
+
 `files` accepts `dir:`, `case:`, `is:fixed`, `is:glob`, `is:follow`,
 `is:hidden`. `live_grep` accepts `dir:`, `filter:`, `case:`, `replace:`,
 `is:regex`, `is:follow`, `is:hidden`, `is:no-ignore`.
@@ -120,6 +124,7 @@ spaces. Completion opens as you type (disable with `auto_complete_flags`).
 ```
 :Pick files is:hidden dir:~/src
 :Pick live_grep is:regex filter:*.lua fn%s+%w+
+:Pick live_grep dir:~/src -- is:hidden   " searches for the text "is:hidden"
 ```
 
 ## Registering your own source
