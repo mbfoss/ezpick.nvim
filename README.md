@@ -87,8 +87,8 @@ An extra argument seeds the initial query:
 | `lsp_declarations` | Declarations of the symbol under the cursor |
 | `lsp_implementations` | Implementations of the symbol under the cursor |
 | `lsp_type_definitions` | Type definitions of the symbol under the cursor |
-| `document_symbols` | LSP symbols in the current buffer |
-| `workspace_symbols` | LSP symbols across the workspace, queried live |
+| `lsp_document_symbols` | LSP symbols in the current buffer |
+| `lsp_workspace_symbols` | LSP symbols across the workspace |
 | `document_diagnostics` | Diagnostics in the current buffer |
 | `workspace_diagnostics` | Diagnostics across the workspace |
 | `keymaps` | Mappings, with their source location |
@@ -103,13 +103,15 @@ An extra argument seeds the initial query:
 
 The four location sources (`lsp_definitions`, `lsp_declarations`,
 `lsp_implementations`, `lsp_type_definitions`) jump straight to their target when
-the server answers with exactly one. `colorschemes` applies each scheme as the
-cursor moves over it and restores the original one if the picker is closed
-without a choice. `command_history` and `search_history` put the chosen entry
-back on the command line unexecuted, ready to edit.
+the server answers with exactly one. `lsp_workspace_symbols` asks the server once
+with an empty query and filters the answer locally; servers that refuse an empty
+query return nothing. `colorschemes` applies each scheme as the cursor moves over
+it and restores the original one if the picker is closed without a choice.
+`command_history` and `search_history` put the chosen entry back on the command
+line unexecuted, ready to edit.
 
-`repeat_last` reopens the previous picker with its last query and cursor
-position, without re-running the source's setup step.
+`resume` reopens the previous picker with its last query and cursor position,
+without re-running the source's setup step.
 
 ### Keys
 

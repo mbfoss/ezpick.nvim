@@ -41,7 +41,7 @@ end
 ---@type ezpick.Config
 M.config = _get_default_config()
 
----The most recent picker invocation, replayed by M.repeat_last(). Holds the
+---The most recent picker invocation, replayed by M.resume(). Holds the
 ---resolved spec and its setup data so repeat reopens without re-running setup,
 ---plus the final prompt text so the same query is restored.
 ---@type {spec:ezpick.PickerSpec, data:table?, query:string, index:integer?, items:ezpick.Picker.Item[]?}?
@@ -79,7 +79,7 @@ local function _do_open(spec, data, initial_query, initial_index, replay_items)
                 return nil
             end
             -- Keep a reference to each fresh result set as it flows to the picker,
-            -- capped, so repeat_last can replay it without re-running the finder.
+            -- capped, so resume can replay it without re-running the finder.
             fetch_opts.data = data
             return spec.finder(query, flags, fetch_opts, function(items)
                 if _last_pick and _last_pick.spec == spec then
@@ -89,7 +89,7 @@ local function _do_open(spec, data, initial_query, initial_index, replay_items)
             end)
         end,
         on_close           = function(query, index)
-            -- Remember the final query and highlighted row so repeat_last restores
+            -- Remember the final query and highlighted row so resume restores
             -- both.
             if _last_pick and _last_pick.spec == spec then
                 _last_pick.query = query
@@ -101,7 +101,7 @@ end
 
 --- Reopen the most recent picker with its last query. Reuses the resolved spec
 --- and setup data, so setup is not run again.
-function M.repeat_last()
+function M.resume()
     if not _last_pick then
         vim.notify("No previous picker session", vim.log.levels.INFO)
         return
@@ -129,7 +129,7 @@ function M.pick(picker_type, initial_query)
     local pickertools = require("ezpick.base.pickertools")
     if not picker_type or picker_type == "" then
         local keys = registry.keys()
-        table.insert(keys, "repeat_last")
+        table.insert(keys, "resume")
         table.sort(keys)
         vim.ui.select(keys, { prompt = "Pick" }, function(choice)
             if choice then M.pick(choice) end
@@ -137,8 +137,8 @@ function M.pick(picker_type, initial_query)
         return
     end
 
-    if picker_type == "repeat_last" then
-        M.repeat_last()
+    if picker_type == "resume" then
+        M.resume()
         return
     end
 
@@ -185,7 +185,7 @@ function M.setup(opts)
             local parts    = vim.split(cmd_line, "%s+", { trimempty = true })
             if #parts <= 1 or (#parts == 2 and not cmd_line:match("%s$")) then
                 local keys = registry.keys()
-                table.insert(keys, "repeat_last")
+                table.insert(keys, "resume")
                 table.sort(keys)
                 return vim.tbl_filter(function(k) return vim.startswith(k, arg_lead) end, keys)
             end

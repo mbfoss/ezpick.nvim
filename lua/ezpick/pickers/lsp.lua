@@ -316,13 +316,26 @@ function M.document_symbols_spec(opts)
     }
 end
 
----Symbols across the whole workspace. Unlike every other source the query is
----not matched locally: each keystroke is forwarded to the server as the
----`workspace/symbol` query and the previous request is cancelled, since only
----the server knows what is out there. `match_label` is still run over the
----returned names, purely to highlight the part that matched.
+---A workspace symbol as this picker keeps it: flattened out of the LSP reply so
+---the finder never has to reach back into the protocol shapes.
+---@class ezpick.lsp.WorkspaceSymbol
+---@field name string
+---@field kind string
+---@field container string?
+---@field filepath string
+---@field lnum integer
+---@field col integer
+
+---Symbols across the whole workspace, registered as `lsp_workspace_symbols`.
+---The server is asked once, with `query` (empty by default, which most servers
+---read as "everything you have"), and the answer is then filtered locally like
+---every other source — the same split Telescope's picker of that name makes.
+---Servers that refuse an empty query need one passed in through `opts.query`.
+---@param opts {query:string?}?
 ---@return ezpick.PickerSpec?
-function M.workspace_symbols_spec()
+function M.workspace_symbols_spec(opts)
+    opts = opts or {}
+
     if vim.tbl_isempty(vim.lsp.get_clients({ bufnr = 0, method = "workspace/symbol" })) then
         vim.notify("No LSP client supports workspace/symbol", vim.log.levels.WARN)
         return nil
@@ -332,6 +345,58 @@ function M.workspace_symbols_spec()
         prompt         = "Workspace Symbols",
         flags          = SYMBOL_FLAGS,
         enable_preview = true,
+        setup          = function(callback)
+            local params = { query = opts.query or "" }
+            vim.lsp.buf_request_all(0, "workspace/symbol", params, function(results_per_client)
+                ---@type ezpick.lsp.WorkspaceSymbol[]
+                local symbols = {}
+                local errors  = {}
+                for client_id, result_or_error in pairs(results_per_client) do
+                    if result_or_error.err then
+                        errors[client_id] = result_or_error.err
+                    end
+                    for _, sym in ipairs(result_or_error.result or {}) do
+                        local location = sym.location
+                        if location and location.uri then
+                            -- A 3.17 server may answer with a location carrying no
+                            -- range (to be filled in by workspaceSymbol/resolve);
+                            -- point at the top of the file in that case.
+                            local range = location.range
+                            symbols[#symbols + 1] = {
+                                name      = sym.name,
+                                kind      = kind_to_string(sym.kind),
+                                container = sym.containerName,
+                                filepath  = vim.uri_to_fname(location.uri),
+                                lnum      = range and range.start.line + 1 or 1,
+                                col       = range and range.start.character or 0,
+                            }
+                        end
+                    end
+                end
+                for _, err in pairs(errors) do
+                    vim.notify("workspace/symbol : " .. err.message, vim.log.levels.ERROR)
+                end
+
+                if #symbols == 0 then
+                    vim.notify("No workspace symbols found")
+                    callback(nil)
+                    return
+                end
+
+                -- Servers answer in no particular order, and the engine does not
+                -- rank by match score, so settle on one predictable ordering.
+                -- Case-insensitively, or every capitalised type name would be
+                -- herded above the lowercase functions.
+                table.sort(symbols, function(a, b)
+                    local a_name, b_name = a.name:lower(), b.name:lower()
+                    if a_name ~= b_name then return a_name < b_name end
+                    if a.name ~= b.name then return a.name < b.name end
+                    if a.filepath ~= b.filepath then return a.filepath < b.filepath end
+                    return a.lnum < b.lnum
+                end)
+                callback({ symbols = symbols })
+            end)
+        end,
         finder         = function(query, flags, fetch_opts, callback)
             local flag_kinds = {}
             local any_kind   = false
@@ -342,59 +407,36 @@ function M.workspace_symbols_spec()
                 end
             end
 
-            local cancelled  = false
-            local cancel_all = vim.lsp.buf_request_all(0, "workspace/symbol", { query = query },
-                function(results_per_client)
-                    if cancelled then return end
+            local items = {}
+            for _, sym in ipairs(fetch_opts.data.symbols) do
+                if any_kind and not flag_kinds[sym.kind] then goto continue end
 
-                    local items = {}
-                    for _, result_or_error in pairs(results_per_client) do
-                        for _, sym in ipairs(result_or_error.result or {}) do
-                            local kind = kind_to_string(sym.kind)
-                            if any_kind and not flag_kinds[kind] then goto continue end
-
-                            local location = sym.location
-                            if not location or not location.uri then goto continue end
-
-                            -- A 3.17 server may answer with a location carrying no
-                            -- range (to be filled in by workspaceSymbol/resolve);
-                            -- point at the top of the file in that case.
-                            local range    = location.range
-                            local filepath = vim.uri_to_fname(location.uri)
-                            local match    = pickertools.match_label(sym.name, query)
-                                or { chunks = pickertools.highlight_chunks(sym.name) }
-
-                            local chunks   = match.chunks
-                            table.insert(chunks, { (" (%s)"):format(kind), "Comment" })
-                            if sym.containerName and sym.containerName ~= "" then
-                                table.insert(chunks, { "  " .. sym.containerName, "Comment" })
-                            end
-
-                            local lnum = range and range.start.line + 1 or 1
-                            local loc  = fsutil.smart_crop_path(
-                                ("%s:%d"):format(fsutil.get_relative_path(filepath) or filepath, lnum),
-                                fetch_opts.list_width)
-
-                            ---@type ezpick.Picker.Item
-                            table.insert(items, {
-                                label_chunks = chunks,
-                                virt_line    = { { loc, "EzPickPath" } },
-                                data         = {
-                                    filepath = filepath,
-                                    lnum     = lnum,
-                                    col      = range and range.start.character or 0,
-                                },
-                            })
-                            ::continue::
-                        end
+                local match = pickertools.match_label(sym.name, query)
+                if match then
+                    local chunks = match.chunks
+                    table.insert(chunks, { (" (%s)"):format(sym.kind), "Comment" })
+                    if sym.container and sym.container ~= "" then
+                        table.insert(chunks, { "  " .. sym.container, "Comment" })
                     end
-                    callback(items)
-                end)
 
-            return function()
-                cancelled = true
-                if cancel_all then cancel_all() end
+                    local loc = fsutil.smart_crop_path(
+                        ("%s:%d"):format(fsutil.get_relative_path(sym.filepath) or sym.filepath, sym.lnum),
+                        fetch_opts.list_width)
+
+                    ---@type ezpick.Picker.Item
+                    table.insert(items, {
+                        label_chunks = chunks,
+                        virt_line    = { { loc, "EzPickPath" } },
+                        data         = {
+                            filepath = sym.filepath,
+                            lnum     = sym.lnum,
+                            col      = sym.col,
+                        },
+                    })
+                end
+                ::continue::
             end
+            callback(items)
         end,
         on_confirm     = function(data)
             if data then ui.smart_open_file(data.filepath, data.lnum, data.col) end

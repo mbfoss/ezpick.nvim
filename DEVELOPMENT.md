@@ -30,7 +30,7 @@ Neovim headless with [`tests/init.lua`](tests/init.lua).
 
 ```
 plugin/ezpick.lua        Neovim version guard (loaded on startup)
-lua/ezpick/init.lua      public API: setup, pick, register, repeat_last
+lua/ezpick/init.lua      public API: setup, pick, register, resume
 lua/ezpick/registry.lua  name -> spec table for the built-in sources
 lua/ezpick/select.lua    vim.ui.select implementation
 lua/ezpick/base/         the picker engine
