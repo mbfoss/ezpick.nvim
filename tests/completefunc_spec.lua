@@ -35,13 +35,13 @@ local function complete(line, leader)
     return startcol, vim.tbl_map(function(it) return it.word end, res.words)
 end
 
-before_each(function()
-    buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(0, buf)
-    vim.b[buf].ezpick_completion = { flags = schema }
-end)
-
 describe("picker completefunc", function()
+    before_each(function()
+        buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_win_set_buf(0, buf)
+        vim.b[buf].ezpick_completion = { flags = schema }
+    end)
+
     it("completes flag names from a dashed word", function()
         local startcol, words = complete("--fi", "--fi")
         assert.are.equal(0, startcol)
