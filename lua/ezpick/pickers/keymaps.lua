@@ -151,6 +151,7 @@ function M.spec()
                     local src_lnum = km.src_lnum or 0
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         data         = {
                             km      = km,
                             source  = src ~= "" and src or nil,

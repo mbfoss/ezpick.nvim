@@ -91,12 +91,12 @@ function M.spec()
             -- Help tag lists run to tens of thousands of entries, so they are
             -- matched in a single batched `matchfuzzypos` (which also ranks them)
             -- instead of one call per tag.
-            local matched, positions
+            local matched, positions, scores
             if query == "" then
                 matched = tags
             else
                 local result = vim.fn.matchfuzzypos(tags, query:lower())
-                matched, positions = result[1], result[2]
+                matched, positions, scores = result[1], result[2], result[3]
             end
 
             local items = {}
@@ -108,6 +108,7 @@ function M.spec()
                 ---@type ezpick.Picker.Item
                 table.insert(items, {
                     label_chunks = chunks,
+                    score        = scores and scores[i] or nil,
                     data         = { tag = tag },
                 })
             end

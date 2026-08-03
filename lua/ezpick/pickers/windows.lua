@@ -41,6 +41,7 @@ local function window_to_picker_item(winid, query, config, current_win)
     ---@type ezpick.Picker.Item
     return {
         label_chunks = label_chunks,
+        score        = match.score,
         data         = { winid = winid, bufnr = bufnr, lnum = cursor[1], col = cursor[2] },
         initial      = winid == current_win or nil,
     }

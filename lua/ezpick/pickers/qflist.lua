@@ -160,6 +160,9 @@ function M.spec(opts)
                 if skip then goto continue end
 
                 local text  = vim.trim(data.text ~= "" and data.text or "[No description]")
+                -- Deliberately unscored: the order of a quickfix list is the
+                -- compiler's or the search's, and reordering it would lose the
+                -- sequence the user is working through.
                 local match = pickertools.match_label(text, query)
                 if match then
                     local chunks = { _type_prefix[data.type] or _type_prefix.N }

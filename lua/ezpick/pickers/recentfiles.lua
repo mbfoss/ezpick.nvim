@@ -54,6 +54,7 @@ function M.spec()
                 if res then
                     table.insert(items, {
                         label_chunks = res.chunks,
+                        score        = res.score,
                         data         = { filepath = file.full_path },
                     })
                 end

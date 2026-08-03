@@ -79,6 +79,7 @@ function M.spec(opts)
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         -- Only steer the unfiltered list to the cursor; once a
                         -- query is typed the best match should win the top row.
                         initial      = (query == "" and entry.lnum == start_lnum) or nil,

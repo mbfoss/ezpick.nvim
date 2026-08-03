@@ -28,6 +28,9 @@ function M.spec(opts)
         finder = function(query, _, _, callback)
             local items = {}
             for _, word in ipairs(suggestions) do
+                -- Deliberately unscored: `spellsuggest()` already ranks these
+                -- by how likely the correction is, and that ordering is the
+                -- answer to the question the picker was opened to ask.
                 local match = pickertools.match_label(word, query)
                 if match then
                     table.insert(items, {

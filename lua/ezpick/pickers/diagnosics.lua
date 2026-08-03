@@ -111,6 +111,7 @@ function M.spec(opts)
                     local virt_line  = multi_buf and { { entry.relpath, "EzPickPath" } } or nil
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = res.score,
                         virt_line    = virt_line,
                         data         = {
                             message  = entry.message,

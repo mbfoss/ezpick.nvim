@@ -19,6 +19,10 @@ local _NS_PREVIEW        = vim.api.nvim_create_namespace("ezpick_PickerPreview")
 local _antiflicker_delay = 200
 local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Title"
 
+--- Sort key standing in for "this source did not score the item"; it sorts
+--- below every real score, which are finite.
+local _NO_SCORE          = -math.huge
+
 
 ---@class ezpick.picker.ItemData
 ---@field filepath string?
@@ -31,6 +35,7 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field virt_line? {[1]:string,[2]:string?}[] Single virtual line rendered below the entry.
 ---@field data ezpick.picker.ItemData
 ---@field initial boolean?
+---@field score number? Match quality, as reported by `match_label`. Ranked descending; see `_rank_items`.
 
 ---@class ezpick.picker.ListItem
 ---@field label_chunks {[1]:string,[2]:string?}[]?
@@ -223,6 +228,56 @@ local function _decode_history(entry)
 		return t.q or ""
 	end
 	return entry
+end
+
+--- Rank fetched items by match quality, best first.
+---
+--- A source opts in by handing back the score `match_label` gave it; whatever it
+--- leaves unscored keeps the order the source produced. `match_label` reports no
+--- score for an empty query, so an unfiltered list always reads in its source's
+--- own order — references by file and position, buffers by number, the jumplist
+--- by recency — and only ranks once there is a query to rank by.
+---
+--- The sort has to be stable, and `table.sort` is not: equal scores are the
+--- common case (glob matches all score 0), and without the index tiebreak those
+--- rows would reshuffle on every keystroke.
+---@param items ezpick.Picker.Item[]
+---@return ezpick.Picker.Item[]
+local function _rank_items(items)
+	local n = #items
+	if n < 2 then return items end
+
+	-- One pass builds both the index array to sort and a flat array of keys,
+	-- and settles the nil question up front: an unscored item takes -inf, so it
+	-- sorts last without the comparator ever testing for nil.
+	local keys   = {}
+	local order  = {}
+	local scored = false
+	for i = 1, n do
+		local score = items[i].score
+		if score == nil then
+			score = _NO_SCORE
+		else
+			scored = true
+		end
+		keys[i]  = score
+		order[i] = i
+	end
+	if not scored then return items end
+
+	-- The comparator runs O(n log n) times, so it reads keys straight out of a
+	-- flat array: one array index per side, rather than an array index plus a
+	-- hash lookup for `.score`. Ties fall back to position, since `table.sort`
+	-- is not stable and equal scores are the common case.
+	table.sort(order, function(ia, ib)
+		local a, b = keys[ia], keys[ib]
+		if a == b then return ia < ib end
+		return a > b
+	end)
+
+	local ranked = {}
+	for i = 1, n do ranked[i] = items[order[i]] end
+	return ranked
 end
 
 ---@param item ezpick.picker.ListItem
@@ -1078,6 +1133,7 @@ function Picker:run_fetch()
 			complete = true
 			self:stop_spinner()
 			if new_items and #new_items > 0 then
+				new_items = _rank_items(new_items)
 				local initial_data
 				for _, item in ipairs(new_items) do
 					if item.initial then
@@ -1371,6 +1427,9 @@ function M._flag_completefunc(findstart, base)
 	end
 	return items
 end
+
+--- Exposed for the test suite; `run_fetch` is the only caller in anger.
+M._rank_items = _rank_items
 
 ---@param opts ezpick.Picker.opts
 ---@param callback ezpick.Picker.Callback

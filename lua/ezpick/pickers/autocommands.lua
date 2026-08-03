@@ -166,6 +166,7 @@ function M.spec()
                 if match then
                     table.insert(items, {
                         label_chunks = match.chunks,
+                        score        = match.score,
                         virt_line    = virt_line,
                         data         = { ac = ac },
                     })

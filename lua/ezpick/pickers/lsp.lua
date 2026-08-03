@@ -142,6 +142,7 @@ local function locations_spec(opts)
                     ---@type ezpick.Picker.Item
                     table.insert(picker_items, {
                         label_chunks = match.chunks,
+                        score        = match.score,
                         virt_line    = { { loc, "EzPickPath" } },
                         data         = {
                             filepath = ref.filename,
@@ -374,6 +375,7 @@ local function calls_spec(opts)
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         virt_line    = { { loc, "EzPickPath" } },
                         data         = {
                             filepath = entry.filepath,
@@ -497,6 +499,7 @@ function M.document_symbols_spec(opts)
                     vim.list_extend(match.chunks, { { (" (%s)"):format(item.kind), "Comment" } })
                     table.insert(filtered, {
                         label_chunks = match.chunks,
+                        score        = match.score,
                         data         = item.data,
                     })
                 end
@@ -620,6 +623,7 @@ function M.workspace_symbols_spec(opts)
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         virt_line    = { { loc, "EzPickPath" } },
                         data         = {
                             filepath = sym.filepath,

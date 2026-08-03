@@ -28,6 +28,57 @@ describe("registry", function()
     end)
 end)
 
+describe("ranking", function()
+    local rank_items  = require("ezpick.base.picker")._rank_items
+    local match_label = require("ezpick.base.pickertools").match_label
+
+    ---@param items table[]
+    ---@return string[]
+    local function names_of(items)
+        return vim.tbl_map(function(item) return item.data.name end, items)
+    end
+
+    ---@param spec table<string, number?> name -> score, as a list of pairs
+    ---@return table[]
+    local function items_of(spec)
+        local items = {}
+        for _, pair in ipairs(spec) do
+            items[#items + 1] = { data = { name = pair[1] }, score = pair[2] }
+        end
+        return items
+    end
+
+    it("leaves a wholly unscored list in source order", function()
+        local items = items_of({ { "zebra" }, { "alpha" }, { "mango" } })
+        assert.same({ "zebra", "alpha", "mango" }, names_of(rank_items(items)))
+    end)
+
+    it("sorts by score, best first", function()
+        local items = items_of({ { "low", 1 }, { "high", 30 }, { "mid", 10 } })
+        assert.same({ "high", "mid", "low" }, names_of(rank_items(items)))
+    end)
+
+    it("keeps equal scores in source order", function()
+        -- Enough items that an unstable sort would almost certainly permute
+        -- them: table.sort still swaps while partitioning all-equal input.
+        local spec = {}
+        for i = 1, 64 do spec[i] = { ("item%02d"):format(i), 100 } end
+
+        local expected = names_of(items_of(spec))
+        assert.same(expected, names_of(rank_items(items_of(spec))))
+    end)
+
+    it("sorts unscored items after scored ones without erroring on nil", function()
+        local items = items_of({ { "none_a" }, { "scored_low", 1 }, { "none_b" }, { "scored_high", 9 } })
+        assert.same({ "scored_high", "scored_low", "none_a", "none_b" }, names_of(rank_items(items)))
+    end)
+
+    it("ranks nothing for an empty query, because match_label scores nothing", function()
+        assert.is_nil(match_label("anything", "").score)
+        assert.is_number(match_label("anything", "a").score)
+    end)
+end)
+
 describe("buffer_lines", function()
     it("lists the non-blank lines of the current buffer, numbered", function()
         local bufnr = vim.api.nvim_create_buf(false, true)

@@ -56,6 +56,7 @@ local function buffer_to_picker_item(bufnr, query, flags, current_buf)
     ---@type ezpick.Picker.Item
     return {
         label_chunks = label_chunks,
+        score        = match.score,
         data         = { bufnr = bufnr, lnum = lnum, col = col },
         initial      = bufnr == current_buf or nil,
     }

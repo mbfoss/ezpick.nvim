@@ -76,6 +76,7 @@ function M.spec()
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = match.chunks,
+                        score        = match.score,
                         -- Open on the scheme in use, so moving away is what
                         -- changes anything.
                         initial      = (query == "" and name == original) or nil,

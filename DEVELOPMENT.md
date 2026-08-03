@@ -72,6 +72,33 @@ A `finder` may return a cancel function; the engine calls it when the query
 changes or the picker closes, so long-running work (rg, LSP requests) must be
 cancellable.
 
+### Ranking
+
+The engine sorts each result set by `item.score`, best first, before rendering.
+A source opts in by passing through the score `match_label` gave it:
+
+```lua
+local match = pickertools.match_label(label, query)
+if match then
+    table.insert(items, { label_chunks = match.chunks, score = match.score, data = ... })
+end
+```
+
+Two properties make this work without any per-source configuration:
+
+- `match_label` reports **no score for an empty query**, so an unfiltered list
+  always reads in the order its source produced — `lsp_references` by file and
+  position, `buffers` by number, `marks` grouped local-then-global. Ranking only
+  kicks in once there is a query to rank by.
+- The sort is **stable**. `table.sort` is not, and equal scores are the common
+  case, so the engine sorts an index array and breaks ties on position. Without
+  that, equal-scoring rows reshuffle on every keystroke.
+
+A source that leaves `score` unset is never reordered. Three do so deliberately,
+each with the reason in the code: `spell_suggest` (`spellsuggest()` already ranks
+by likelihood), `quickfix`/`loclist` (the list's order belongs to whatever built
+it), and `jumplist` (recency is the reason you opened it).
+
 A source can decline to open twice over: its spec builder may return `nil` (no
 marks are set, no LSP client answers `workspace/symbol`), and an async `setup`
 may call back with `nil` data. The LSP location sources use the latter to jump

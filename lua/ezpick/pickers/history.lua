@@ -50,6 +50,7 @@ function M.spec(opts)
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         data         = { entry = entry },
                     })
                 end

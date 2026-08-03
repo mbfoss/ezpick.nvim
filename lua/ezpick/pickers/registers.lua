@@ -79,6 +79,7 @@ function M.spec()
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         data         = {
                             name    = entry.name,
                             lines   = entry.lines,

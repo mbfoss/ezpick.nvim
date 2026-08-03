@@ -47,6 +47,8 @@ function M.spec()
             for _, data in ipairs(entries) do
                 local label = data.relpath or ""
                 if label == "" then label = "[No Name]" end
+                -- Deliberately unscored: the jumplist is ordered by recency,
+                -- which is the whole reason to open it.
                 local match = pickertools.match_label(label, query)
                 if match then
                     table.insert(match.chunks, { string.format(":%d:%d", data.lnum, data.col) })

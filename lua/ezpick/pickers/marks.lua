@@ -112,6 +112,7 @@ function M.spec()
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
+                        score        = match.score,
                         virt_line    = { { fsutil.smart_crop_path(loc, fetch_opts.list_width), "EzPickPath" } },
                         data         = {
                             bufnr    = entry.bufnr,
