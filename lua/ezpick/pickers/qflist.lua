@@ -5,17 +5,21 @@ local fsutil       = require("ezpick.util.fsutil")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS        = {
-    { name = "type",  type = "value",   multi = true, desc = "filter by type: error, warn, info, hint", values = { "error", "warn", "info", "hint" } },
-    { name = "filter", type = "value",   multi = true, desc = "glob filter: *.txt, **/dir/**" },
-    { name = "valid", type = "boolean",               desc = "only items with a resolved location" },
+    { name = "errors",   type = "boolean",             desc = "only error items" },
+    { name = "warnings", type = "boolean",             desc = "only warning items" },
+    { name = "info",     type = "boolean",             desc = "only info items" },
+    { name = "hints",    type = "boolean",             desc = "only hint items" },
+    { name = "filter",   type = "value", multi = true, desc = "glob filter: *.txt, **/dir/**" },
+    { name = "valid",    type = "boolean",             desc = "only items with a resolved location" },
 }
 
--- Map friendly type names (and the native single-letter codes) onto qf `type`.
-local _type_alias  = {
-    error = "E", e = "E",
-    warn  = "W", warning = "W", w = "W",
-    info  = "I", i = "I",
-    hint  = "N", note = "N", n = "N",
+-- Boolean type flags onto the qf `type` code they select. Several may be
+-- combined; together they act as a union.
+local _type_flags  = {
+    errors   = "E",
+    warnings = "W",
+    info     = "I",
+    hints    = "N",
 }
 
 ---@alias ezpick.qflist_filter 'all'|"errors"|"warnings"|"info"
@@ -141,18 +145,16 @@ function M.spec(opts)
             for _, data in ipairs(entries) do
                 if flags.valid and not data.valid then goto continue end
 
-                local skip       = false
-                local type_flags = flags.type or {}
-                if #type_flags > 0 then
-                    local matched = false
-                    for _, v in ipairs(type_flags) do
-                        local code = _type_alias[v:lower()] or v:upper()
-                        if data.type == code then
-                            matched = true; break
-                        end
+                local skip     = false
+                local any_type = false
+                local matched  = false
+                for flag, code in pairs(_type_flags) do
+                    if flags[flag] then
+                        any_type = true
+                        if data.type == code then matched = true end
                     end
-                    if not matched then skip = true end
                 end
+                if any_type and not matched then skip = true end
                 local in_globs = flags["filter"] or {}
                 if not skip and not pickertools.match_globs(in_globs, data.relpath, true) then
                     skip = true
