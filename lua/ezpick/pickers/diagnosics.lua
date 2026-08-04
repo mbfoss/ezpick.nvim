@@ -109,9 +109,11 @@ function M.spec(opts)
                     local chunks     = vim.deepcopy(entry.prefix_chunks)
                     vim.list_extend(chunks, res.chunks)
                     local virt_line  = multi_buf and { { entry.relpath, "EzPickPath" } } or nil
+                    -- Deliberately unscored: the entries were sorted by position
+                    -- above, and walking diagnostics in file order is the point
+                    -- of the list — a query narrows it, it does not re-rank it.
                     table.insert(items, {
                         label_chunks = chunks,
-                        score        = res.score,
                         virt_line    = virt_line,
                         data         = {
                             message  = entry.message,

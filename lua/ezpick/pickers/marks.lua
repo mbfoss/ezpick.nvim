@@ -110,9 +110,10 @@ function M.spec()
 
                     local loc = ("%s:%d:%d"):format(relpath or "[No Name]", entry.lnum, entry.col)
                     ---@type ezpick.Picker.Item
+                    -- Deliberately unscored: marks are found by their letter, and
+                    -- the sort above groups them the way that letter is read.
                     table.insert(items, {
                         label_chunks = chunks,
-                        score        = match.score,
                         virt_line    = { { fsutil.smart_crop_path(loc, fetch_opts.list_width), "EzPickPath" } },
                         data         = {
                             bufnr    = entry.bufnr,

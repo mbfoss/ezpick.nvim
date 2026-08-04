@@ -77,9 +77,10 @@ function M.spec()
                         table.insert(chunks, { " [block]", "Comment" })
                     end
                     ---@type ezpick.Picker.Item
+                    -- Deliberately unscored: registers are located by name, and
+                    -- the collection order is the one `:registers` shows.
                     table.insert(items, {
                         label_chunks = chunks,
-                        score        = match.score,
                         data         = {
                             name    = entry.name,
                             lines   = entry.lines,

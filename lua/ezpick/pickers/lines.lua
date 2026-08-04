@@ -77,11 +77,13 @@ function M.spec(opts)
                     local chunks = { { ("%" .. lnum_width .. "d "):format(entry.lnum), "LineNr" } }
                     vim.list_extend(chunks, match.chunks)
                     ---@type ezpick.Picker.Item
+                    -- Deliberately unscored: a filtered buffer is still read top
+                    -- to bottom, so rows keep document order and the line-number
+                    -- column stays monotonic.
                     table.insert(items, {
                         label_chunks = chunks,
-                        score        = match.score,
                         -- Only steer the unfiltered list to the cursor; once a
-                        -- query is typed the best match should win the top row.
+                        -- query narrows it, its first match is the better start.
                         initial      = (query == "" and entry.lnum == start_lnum) or nil,
                         data         = {
                             bufnr    = bufnr,

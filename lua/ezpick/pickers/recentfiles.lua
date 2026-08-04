@@ -52,9 +52,11 @@ function M.spec()
             for _, file in ipairs(recent_files) do
                 local res = pickertools.match_label(file.match_path, query)
                 if res then
+                    -- Deliberately unscored: the list is ordered by last use, and
+                    -- that recency is the only reason to reach for it over the
+                    -- files picker.
                     table.insert(items, {
                         label_chunks = res.chunks,
-                        score        = res.score,
                         data         = { filepath = file.full_path },
                     })
                 end

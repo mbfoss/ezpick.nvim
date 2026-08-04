@@ -48,9 +48,11 @@ function M.spec(opts)
                     local chunks = { { ("%3d "):format(i), "Comment" }, { kind.prefix, "NonText" } }
                     vim.list_extend(chunks, match.chunks)
                     ---@type ezpick.Picker.Item
+                    -- Deliberately unscored: recency is what a history list is
+                    -- for, and the index column printed above only reads right
+                    -- if the rows keep that order while the query narrows them.
                     table.insert(items, {
                         label_chunks = chunks,
-                        score        = match.score,
                         data         = { entry = entry },
                     })
                 end
