@@ -5,10 +5,10 @@ local fsutil       = require("ezpick.util.fsutil")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS        = {
-    { name = "errors",   type = "boolean",             desc = "only error items" },
-    { name = "warnings", type = "boolean",             desc = "only warning items" },
-    { name = "info",     type = "boolean",             desc = "only info items" },
-    { name = "hints",    type = "boolean",             desc = "only hint items" },
+    { name = "errors",   type = "boolean",             desc = "show error items" },
+    { name = "warnings", type = "boolean",             desc = "show warning items" },
+    { name = "info",     type = "boolean",             desc = "show info items" },
+    { name = "hints",    type = "boolean",             desc = "show hint items" },
     { name = "filter",   type = "value", multi = true, desc = "glob filter: *.txt, **/dir/**" },
     { name = "valid",    type = "boolean",             desc = "only items with a resolved location" },
 }
