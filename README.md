@@ -142,8 +142,9 @@ quoting, spacing kept as typed. Use it to search for something that would
 otherwise look like a flag.
 
 `files` accepts `--dir`, `--case`, `--fixed`, `--glob`, `--follow`,
-`--hidden`. `live_grep` accepts `--dir`, `--filter`, `--case`, `--replace`,
-`--regex`, `--follow`, `--hidden`, `--no-ignore`. `marks` accepts
+`--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
+`--replace`, `--regex`, `--word`, `--line`, `--invert`, `--follow`, `--hidden`,
+`--no-ignore`, `--max-depth`. `marks` accepts
 `--global` and `--buffer`, `registers` accepts `--empty`, and the symbol
 sources accept one boolean per LSP symbol kind (`--Function`, `--Class`, …),
 several of which are OR'd together.
@@ -151,6 +152,7 @@ several of which are OR'd together.
 ```
 :Pick files --hidden --dir ~/src
 :Pick live_grep --regex --filter *.lua fn%s+%w+
+:Pick live_grep --type lua --type !markdown --word setup
 :Pick live_grep --dir ~/src -- --hidden   " searches for the text "--hidden"
 ```
 

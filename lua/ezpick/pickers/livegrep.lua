@@ -151,16 +151,58 @@ end
 ---@field cwd         string
 ---@field max_results number?
 
+--- rg's file types (`rg --type-list`), parsed once per session: `{ lua = { "*.lua" }, … }`.
+---@type table<string, string[]>?
+local _rg_types
+
+---@return table<string, string[]>
+local function rg_types()
+    if _rg_types then return _rg_types end
+
+    local types = {}
+    if vim.fn.executable("rg") == 1 then
+        local res = vim.system({ "rg", "--type-list" }, { text = true }):wait()
+        if res.code == 0 then
+            for line in vim.gsplit(res.stdout or "", "\n", { trimempty = true }) do
+                local name, globs = line:match("^([^:]+):%s*(.+)$")
+                if name then
+                    local list = {}
+                    for g in vim.gsplit(globs, ",", { trimempty = true }) do
+                        list[#list + 1] = vim.trim(g)
+                    end
+                    types[name] = list
+                end
+            end
+        end
+    end
+
+    _rg_types = types
+    return types
+end
+
+---@param partial string
+---@return string[]
+local function complete_type(partial)
+    local names = vim.tbl_keys(rg_types())
+    table.sort(names)
+    return vim.tbl_filter(function(n) return vim.startswith(n, partial) end, names)
+end
+
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
     { name = "dir",     type = "value",   complete = "dir",          desc = "search root directory"              },
     { name = "filter",  type = "value",   multi = true,              desc = "glob filter: *.txt, !*.lua, **/dir/**" },
+    { name = "type",      type = "value", multi = true, complete = complete_type, desc = "rg file type: lua, rust, !md (see rg --type-list)" },
     { name = "regex",   type = "boolean", desc = "enable regex mode"                                             },
     { name = "case",    type = "value",   values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
+    { name = "word",      type = "boolean", desc = "match whole words only"                                      },
+    { name = "line",      type = "boolean", desc = "match whole lines only"                                      },
+    { name = "invert",    type = "boolean", desc = "show lines that do NOT match"                                 },
     { name = "follow",    type = "boolean", desc = "follow symlinks"                                             },
     { name = "hidden",    type = "boolean", desc = "include hidden (dotfiles)"                                   },
     { name = "no-ignore", type = "boolean", desc = "disable .gitignore / .ignore rules"                         },
-    { name = "replace",   type = "value", allow_empty = true,        desc = "replacement text (search & replace; empty deletes matches)" },
+    { name = "max-depth", type = "value",   desc = "max directory depth to descend"                              },
+    { name = "replace",   type = "value", allow_empty = true,        desc = "replacement text (search & replace)" },
 }
 
 
@@ -196,6 +238,18 @@ local function build_rg_base(parsed)
         table.insert(args, "--fixed-strings")
     end
 
+    if flags.word then
+        table.insert(args, "--word-regexp")
+    end
+
+    if flags.line then
+        table.insert(args, "--line-regexp")
+    end
+
+    if flags.invert then
+        table.insert(args, "--invert-match")
+    end
+
     if flags.replace then
         table.insert(args, "--replace")
         table.insert(args, flags.replace)
@@ -216,6 +270,20 @@ local function build_rg_dir_cmd(parsed)
     for _, g in ipairs(parsed.flags["filter"] or {}) do
         table.insert(args, "-g")
         table.insert(args, g)
+    end
+    for _, t in ipairs(parsed.flags["type"] or {}) do
+        if t:sub(1, 1) == "!" then
+            table.insert(args, "--type-not")
+            table.insert(args, t:sub(2))
+        else
+            table.insert(args, "--type")
+            table.insert(args, t)
+        end
+    end
+    local depth = tonumber(parsed.flags["max-depth"])
+    if depth then
+        table.insert(args, "--max-depth")
+        table.insert(args, tostring(math.floor(depth)))
     end
     table.insert(args, "--")
     table.insert(args, parsed.query)
@@ -241,6 +309,28 @@ local function compile_filter_globs(filters)
         (#exclude > 0 and strutil.compile_globs(exclude) or nil)
 end
 
+--- Same idea for `--type`: rg's own `-t` filters files it walks, not stdin, so
+--- the type globs are expanded here and matched against each buffer's basename
+--- (rg matches a slashless type glob the same way).
+---@param types string[]?
+---@return vim.regex[]? include, vim.regex[]? exclude
+local function compile_type_globs(types)
+    if not types or #types == 0 then return nil, nil end
+
+    local known = rg_types()
+    local include, exclude = {}, {}
+    for _, t in ipairs(types) do
+        local negated = t:sub(1, 1) == "!"
+        local name    = negated and t:sub(2) or t
+        local target  = negated and exclude or include
+        for _, g in ipairs(known[name] or {}) do
+            target[#target + 1] = g
+        end
+    end
+    return (#include > 0 and strutil.compile_globs(include) or nil),
+        (#exclude > 0 and strutil.compile_globs(exclude) or nil)
+end
+
 ---@class ezpick.livegrep.OpenBuf
 ---@field bufnr   integer
 ---@field path    string  absolute file path
@@ -248,11 +338,14 @@ end
 
 --- Loaded, file-backed buffers under `cwd` that pass the filter globs. These are
 --- searched from their in-memory text so unsaved (and stale-on-disk) edits win.
----@param cwd     string
----@param filters string[]?
+---@param cwd       string
+---@param filters   string[]?
+---@param types     string[]?
+---@param max_depth number?  -- directory depth limit, mirroring rg's --max-depth
 ---@return ezpick.livegrep.OpenBuf[]
-local function collect_open_buffers(cwd, filters)
+local function collect_open_buffers(cwd, filters, types, max_depth)
     local include_re, exclude_re = compile_filter_globs(filters)
+    local type_include, type_exclude = compile_type_globs(types)
     local out = {}
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
         if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].buftype == "" then
@@ -260,7 +353,12 @@ local function collect_open_buffers(cwd, filters)
             if name ~= "" then
                 local path = vim.fn.fnamemodify(name, ":p")
                 local rel  = fsutil.get_relative_path(path, cwd)
-                if rel and strutil.check_path_pattern(rel, false, include_re, exclude_re) then
+                local base = rel and vim.fs.basename(rel) or ""
+                if rel
+                    and strutil.check_path_pattern(rel, false, include_re, exclude_re)
+                    and strutil.check_path_pattern(base, false, type_include, type_exclude)
+                    and (not max_depth or select(2, rel:gsub("/", "")) < max_depth)
+                then
                     out[#out + 1] = { bufnr = bufnr, path = path, relpath = rel }
                 end
             end
@@ -401,7 +499,12 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
 
     -- Open buffers take priority: search their in-memory text, then drop the
     -- on-disk matches for those same files so stale disk content never wins.
-    local bufs = collect_open_buffers(cwd, parsed.flags["filter"])
+    local bufs = collect_open_buffers(
+        cwd,
+        parsed.flags["filter"],
+        parsed.flags["type"],
+        tonumber(parsed.flags["max-depth"])
+    )
     local open_relpaths = {} ---@type table<string, true>
     for _, b in ipairs(bufs) do
         open_relpaths[b.relpath] = true
