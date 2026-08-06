@@ -24,8 +24,8 @@ local icons       = require("ezpick.icons")
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
     { name = "dir",    type = "value",   complete = "dir", desc = "override search root directory"    },
-    { name = "mode",   type = "value",   values = { "fuzzy", "fixed", "glob" }, desc = "match: fuzzy (default) | fixed (literal substring) | glob (rg-style globs, space separated)" },
-    { name = "case",   type = "value",   values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
+    { name = "mode",   type = "value",   strict = true, values = { "fuzzy", "fixed", "glob" }, desc = "match: fuzzy (default) | fixed (literal substring) | glob (rg-style globs, space separated)" },
+    { name = "case",   type = "value",   strict = true, values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
     { name = "follow", type = "boolean", desc = "follow symlinks"                   },
     { name = "hidden", type = "boolean", desc = "include hidden (dotfiles)"         },
 }

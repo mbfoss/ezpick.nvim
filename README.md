@@ -132,14 +132,26 @@ Inside a picker, `g?` shows the full list:
 
 ### Query flags
 
-Sources can accept inline flags in the query. Boolean flags are written
-`--<name>`, value flags `--<name> <value>`; a value flag takes the next token as
-its value, so wrap that value in `"` if it contains spaces. Completion opens as
-you type (disable with `auto_complete_flags`).
+Sources can accept inline flags in the query. **Flags go first**; everything
+from the first non-flag word onward is the query, verbatim — spaces, quotes and
+dashes in it are ordinary characters, so a flag name only needs escaping when
+the query itself starts with one. Completion opens as you type (disable with
+`auto_complete_flags`).
 
-Everything after a standalone `--` is taken as literal query text: no flags, no
-quoting, spacing kept as typed. Use it to search for something that would
-otherwise look like a flag.
+Switches are written `--<name>`, filters `--<name> <value>` or
+`--<name>=<value>`; wrap a value in `"` if it contains spaces. The glued `=`
+form is the exact one: it can carry an empty value (`--replace=`) or a value
+that looks like a flag (`--dir=--x`). Names are matched loosely — `--no-ignore`,
+`--noignore` and `--NoIgnore` are the same flag.
+
+A standalone `--` ends the flagged section, for the one case that needs it: a
+query starting with a flag name.
+
+Mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, an
+unfinished quote or a flag written after the query gets an underline and a short
+hint in the prompt, while the search keeps running on a best-effort reading. A
+hint about the flag the cursor is still inside waits until the cursor moves on,
+so writing one out correctly is silent.
 
 `files` accepts `--dir`, `--case`, `--mode` (`fuzzy`|`fixed`|`glob`),
 `--follow`, `--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
@@ -153,7 +165,8 @@ several of which are OR'd together.
 :Pick files --hidden --dir ~/src
 :Pick live_grep --regex --filter *.lua fn%s+%w+
 :Pick live_grep --type lua --type !markdown --word setup
-:Pick live_grep --dir ~/src -- --hidden   " searches for the text "--hidden"
+:Pick live_grep --dir="~/my src" --replace= drop me   " delete every match
+:Pick live_grep --dir ~/src -- --hidden               " searches for "--hidden"
 ```
 
 ## Registering your own source

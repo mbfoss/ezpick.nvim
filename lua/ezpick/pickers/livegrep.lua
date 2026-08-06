@@ -194,7 +194,7 @@ local FLAGS       = {
     { name = "filter",  type = "value",   multi = true,              desc = "glob filter: *.txt, !*.lua, **/dir/**" },
     { name = "type",      type = "value", multi = true, complete = complete_type, desc = "rg file type: lua, rust, !md (see rg --type-list)" },
     { name = "regex",   type = "boolean", desc = "enable regex mode"                                             },
-    { name = "case",    type = "value",   values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
+    { name = "case",    type = "value",   strict = true, values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
     { name = "word",      type = "boolean", desc = "match whole words only"                                      },
     { name = "line",      type = "boolean", desc = "match whole lines only"                                      },
     { name = "invert",    type = "boolean", desc = "show lines that do NOT match"                                 },
@@ -202,7 +202,7 @@ local FLAGS       = {
     { name = "hidden",    type = "boolean", desc = "include hidden (dotfiles)"                                   },
     { name = "no-ignore", type = "boolean", desc = "disable .gitignore / .ignore rules"                         },
     { name = "max-depth", type = "value",   desc = "max directory depth to descend"                              },
-    { name = "replace",   type = "value", allow_empty = true,        desc = "replacement text (search & replace)" },
+    { name = "replace",   type = "value",                            desc = "replacement text (--replace= deletes)" },
 }
 
 

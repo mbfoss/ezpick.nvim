@@ -98,6 +98,31 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field preview_height number
 
 
+---Hints that describe an incomplete thing rather than a wrong one. Every flag
+---passes through these states on the way to being written correctly, so they are
+---held back until the cursor has moved off what they point at. The rest --- a
+---flag in the wrong place, a value on a switch --- are already settled mistakes
+---and say so immediately.
+---@type table<ezpick.queryflags.HintKind, boolean>
+local _HELD_WHILE_TYPING = {
+	["missing-value"]  = true,
+	["unclosed-quote"] = true,
+	["unknown-flag"]   = true,
+	["bad-value"]      = true,
+}
+
+---Whether the cursor is still in the span `hint` points at: it counts as inside
+---while only whitespace separates the end of the span from the cursor, so the
+---space after "--dir" is part of writing "--dir", not of having finished it.
+---@param query  string
+---@param hint   ezpick.queryflags.Hint
+---@param cursor integer  -- 0-indexed byte column
+---@return boolean
+local function _at_cursor(query, hint, cursor)
+	if cursor <= hint.start then return false end
+	return not query:sub(hint.finish + 1, cursor):find("%S")
+end
+
 local function _show_help()
 	local help_text = [[
 `<CR>`        Confirm
@@ -307,6 +332,7 @@ end
 ---@field history string[]
 ---@field history_idx number
 ---@field _suppress_autocomplete boolean?
+---@field _query_hint string? -- message of the query hint currently shown in the prompt
 ---@field _list_sep_line string
 ---@field _show_list_sep boolean
 local Picker = {}
@@ -670,18 +696,52 @@ end
 function Picker:render_prompt_highlight(query)
 	if not self.pbuf then return end
 	vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CONTENT, 0, -1)
+	self._query_hint = nil
 	if #self.opts.flags == 0 then return end
+
 	for _, h in ipairs(queryflags.highlight(self.opts.flags, query)) do
 		vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, h.start, {
 			end_col  = h.finish,
 			hl_group = h.hl,
 		})
 	end
+
+	-- A hint about the span the cursor is still inside is a hint about
+	-- unfinished typing: half of "--dir" is a missing value and an opening quote
+	-- is an unclosed one, and saying so on the way through helps nobody. Those
+	-- wait for the cursor to leave; a mistake that is already complete does not.
+	local cursor = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
+	local shown  = {}
+	for _, hint in ipairs(queryflags.parse(self.opts.flags, query).hints) do
+		if not (_HELD_WHILE_TYPING[hint.kind] and _at_cursor(query, hint, cursor)) then
+			table.insert(shown, hint)
+		end
+	end
+	if #shown == 0 then return end
+
+	for _, hint in ipairs(shown) do
+		vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, math.min(hint.start, #query), {
+			end_col  = math.min(hint.finish, #query),
+			hl_group = "DiagnosticUnderlineWarn",
+			priority = 200,
+		})
+	end
+
+	-- Only the first gets words; the prompt line is not a diagnostics window.
+	self._query_hint = shown[1].msg
+	vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, 0, {
+		virt_text     = { { " " .. shown[1].msg, "DiagnosticVirtualTextWarn" } },
+		virt_text_pos = "eol_right_align",
+		hl_mode       = "blend",
+		priority      = 100,
+	})
 end
 
 function Picker:render_position()
 	if not self.pbuf then return end
 	vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CURSOR, 0, -1)
+	-- The hint occupies the same corner and is the more urgent of the two.
+	if self._query_hint then return end
 	local total = #self.list_items
 	if total == 0 then return end
 	local cur = self:get_cursor() or 1
@@ -1052,36 +1112,6 @@ function Picker:set_items(items)
 	vim.wo[self.lwin].cursorline = #self.list_items > 0
 end
 
----Display a single-line parse error in the results list, replacing any items.
----@param msg string
-function Picker:show_query_error(msg)
-	if self.async_fetch_cancel then
-		self.async_fetch_cancel()
-		self.async_fetch_cancel = nil
-	end
-	self:stop_spinner()
-	self:request_clear_preview()
-
-	self.async_fetch_context = self.async_fetch_context + 1
-	self._last_clean_query   = nil
-	self._last_flags         = nil
-
-	self.list_items = {}
-
-	vim.bo[self.lbuf].modifiable = true
-	vim.api.nvim_buf_set_lines(self.lbuf, 0, -1, false, { "  " .. msg })
-	vim.bo[self.lbuf].modifiable = false
-	vim.wo[self.lwin].cursorline = false
-
-	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
-	vim.api.nvim_buf_set_extmark(self.lbuf, _NS_CONTENT, 0, 0, {
-		end_col  = #("  " .. msg),
-		hl_group = "NonText",
-	})
-	self:render_cursor()
-	self:render_position()
-end
-
 function Picker:run_fetch()
 	local query_text   = self.query_text
 	self.current_query = query_text
@@ -1093,11 +1123,10 @@ function Picker:run_fetch()
 
 	local clean_query, flags
 	if #self.opts.flags > 0 then
+		-- `parse` never refuses: a half-typed quote or an unknown flag yields a
+		-- hint beside a best-effort query, so the list keeps up with the typing
+		-- instead of emptying at the first character of a mistake.
 		local parsed      = queryflags.parse(self.opts.flags, query_text)
-		if parsed.error then
-			self:show_query_error(parsed.error)
-			return
-		end
 		clean_query       = parsed.query
 		flags             = parsed.flags
 		fetch_opts.parsed = parsed

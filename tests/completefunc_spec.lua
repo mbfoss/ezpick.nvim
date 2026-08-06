@@ -86,3 +86,100 @@ describe("picker completefunc", function()
         assert.are.equal("always", picker._flag_completefunc(0, "").refresh)
     end)
 end)
+
+describe("picker query hints", function()
+    ---Open a picker whose finder records what it was asked for, type `text` into
+    ---its prompt, and report back. `cursor` defaults to the end of `text`, where
+    ---it would sit having just been typed.
+    ---@param text   string
+    ---@param cursor integer?  -- 0-indexed byte column
+    ---@return string? query, table? flags, string? hint
+    local function type_query(text, cursor)
+        local seen_query, seen_flags
+        picker.open({
+            prompt = "Hints",
+            flags  = {
+                { name = "dir",    type = "value" },
+                { name = "case",   type = "value", strict = true, values = { "smart", "on", "off" } },
+                { name = "hidden", type = "boolean" },
+            },
+            finder = function(query, flags, _, cb)
+                seen_query, seen_flags = query, flags
+                cb({ { label_chunks = { { "item" } }, data = {} } })
+            end,
+            on_confirm = function() end,
+        }, function() end)
+
+        local pbuf, pwin
+        for _, b in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_valid(b) and (vim.bo[b].omnifunc or ""):find("ezpick", 1, true) then
+                pbuf = b
+            end
+        end
+        assert.not_nil(pbuf)
+        for _, w in ipairs(vim.api.nvim_list_wins()) do
+            if vim.api.nvim_win_get_buf(w) == pbuf then pwin = w end
+        end
+        assert.not_nil(pwin)
+
+        -- Insert mode is where this is typed, and there the cursor may sit one
+        -- past the last character; without `onemore` normal mode clamps it back
+        -- onto the text and every hint looks like one being typed.
+        vim.wo[pwin].virtualedit = "onemore"
+
+        vim.api.nvim_buf_set_lines(pbuf, 0, -1, false, { text })
+        vim.api.nvim_win_set_cursor(pwin, { 1, cursor or #text })
+        vim.api.nvim_exec_autocmds("TextChanged", { buffer = pbuf })
+        vim.wait(50)
+
+        -- The position counter shares this corner, so match on the hint's own
+        -- highlight rather than on being virtual text.
+        local hint
+        for _, m in ipairs(vim.api.nvim_buf_get_extmarks(pbuf, -1, 0, -1, { details = true })) do
+            local vt = m[4] and m[4].virt_text
+            if vt and vt[1][2] == "DiagnosticVirtualTextWarn" then hint = vim.trim(vt[1][1]) end
+        end
+        return seen_query, seen_flags, hint
+    end
+
+    after_each(function() vim.cmd("silent! close!") end)
+
+    it("keeps searching through an unfinished quote", function()
+        -- The moment between the two quotes must not empty the list.
+        local query, flags = type_query('--dir "My Doc')
+        assert.are.equal("", query)
+        assert.are.equal("My Doc", flags.dir)
+    end)
+
+    it("says nothing about a flag the cursor is still writing", function()
+        -- Every one of these is a state on the way to a correct flag; nagging
+        -- through them turns the prompt into a stream of complaints.
+        assert.is_nil(select(3, type_query("--dir")))
+        assert.is_nil(select(3, type_query("--dir ")))
+        assert.is_nil(select(3, type_query('--dir "My Doc')))
+        assert.is_nil(select(3, type_query("--case sm")))
+    end)
+
+    it("speaks up once the cursor leaves what it points at", function()
+        assert.is_truthy(select(3, type_query('--dir "My Doc', 2)):find('unclosed "', 1, true))
+        assert.is_truthy(select(3, type_query("--case sm x")):find("smart|on|off", 1, true))
+    end)
+
+    it("searches for a typo'd flag and suggests the real one", function()
+        local query, _, hint = type_query("--hiddn x")
+        assert.are.equal("--hiddn x", query)
+        assert.is_truthy(hint:find("--hidden", 1, true))
+    end)
+
+    it("says why a flag after the query did nothing", function()
+        local query, flags, hint = type_query("hello --hidden")
+        assert.are.equal("hello --hidden", query)
+        assert.is_nil(flags.hidden)
+        assert.is_truthy(hint:find("must come first", 1, true))
+    end)
+
+    it("passes the query through byte for byte", function()
+        local query = type_query("--hidden foo  bar ")
+        assert.are.equal("foo  bar ", query)
+    end)
+end)

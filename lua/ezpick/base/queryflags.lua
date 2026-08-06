@@ -9,15 +9,33 @@ local M = {}
 ---@field name     string
 ---@field type     "boolean"|"value"
 ---@field multi    boolean?   -- allow multiple occurrences (type=value only)
----@field allow_empty boolean? -- keep an empty value instead of dropping the flag (type=value only)
+---@field strict   boolean?   -- `values` is the complete set; anything else is hinted (type=value only)
 ---@field values   string[]?  -- known static values offered in completion (type=value only)
 ---@field complete ezpick.queryflags.CompleteSpec?  -- dynamic value completion source (type=value only)
+---@field alias    string[]?  -- extra names accepted for this flag
 ---@field desc     string?    -- shown in the completion menu
 
+---@alias ezpick.queryflags.HintKind
+---| "unknown-flag"     -- a dashed word that names no flag
+---| "misplaced-flag"   -- a real flag name written in the query, where it is text
+---| "missing-value"    -- a value flag with nothing to take
+---| "bad-value"        -- a value outside a strict flag's `values`
+---| "unclosed-quote"   -- a value quote that never closes
+---| "unexpected-value" -- a value glued onto a switch
+
+---A problem worth pointing out that is never worth refusing to search over:
+---every hint is advisory, and `parse` always returns a usable query beside it.
+---@class ezpick.queryflags.Hint
+---@field start  integer -- 0-indexed byte start of the offending span
+---@field finish integer -- 0-indexed byte end of the offending span (exclusive)
+---@field msg    string  -- terse; it shares the prompt line with the query
+---@field kind   ezpick.queryflags.HintKind
+
 ---@class ezpick.queryflags.ParseResult
----@field query string  -- the literal query (all non-flag tokens joined by space, followed by the raw text after "--")
----@field flags table   -- {[name] = true | string | string[]}
----@field error string? -- set when the query is malformed (e.g. an unclosed quote)
+---@field query       string  -- the query, verbatim: every byte from where the flags stop
+---@field query_start integer -- 1-indexed byte offset where `query` begins (#raw+1 when empty)
+---@field flags       table   -- {[name] = true | string | string[]}
+---@field hints       ezpick.queryflags.Hint[]
 
 ---@class ezpick.queryflags.Completions
 ---@field startcol integer  -- 1-indexed column for vim.fn.complete()
@@ -40,224 +58,423 @@ local _PATH_COMPLETE = {
     shellcmdline = true,
 }
 
+-- Syntax:
+--
+--   [--flag] [--flag value] [--flag=value] ... [--] <query, verbatim>
+--
+-- Flags come first. Scanning stops at the first token that does not name a
+-- known flag, and everything from there to the end of the line is the query,
+-- byte for byte -- spaces, quotes and dashes inside it are ordinary characters.
+-- That verbatim tail is the point of the ordering: a picker that greps for what
+-- was typed must receive exactly what was typed.
+--
+--   '--hidden --dir src foo  bar'  → flags hidden, dir=src; query 'foo  bar'
+--   'foo --hidden'                 → query 'foo --hidden' (+ a misplaced hint)
+--
+-- Flag names are matched loosely: case, '-' and '_' are ignored, so --no-ignore,
+-- --noignore and --NoIgnore are the same flag, as is any name listed in `alias`.
+--
+-- A value flag takes its value either glued on with '=' or as the next token.
+-- The glued form is the precise one: it can express an empty value ("--repl=")
+-- and a value that looks like a flag ("--dir=--x"). In the spaced form a token
+-- naming a known flag is not swallowed as a value -- '--dir --hidden' is a
+-- forgotten value, not a directory called "--hidden".
+--
+-- Quoting (via ") applies only to a value, and only when the opening quote is
+-- its first character. It lets the value contain spaces:
+--   '--path "foo bar"'  → path = 'foo bar'
+--   '--path="foo bar"'  → path = 'foo bar'
+-- Inside a quoted value a literal double quote is written as \". Text after the
+-- closing quote continues the value ('--path "foo bar"baz' → "foo barbaz"). An
+-- unterminated quote is reported as a hint but still parsed, so results keep
+-- coming while the closing quote is still being typed.
+--
+-- Because the query is whatever follows the flags, a flag name only needs
+-- escaping when the query *starts* with one. A standalone "--" ends the flagged
+-- section for that case:
+--   '-- --hidden'  → query '--hidden'
+--
+---@class ezpick.queryflags.Piece
+---@field kind    "flag"|"value"|"separator"
+---@field start   integer                        -- 1-indexed start in source
+---@field finish  integer                        -- 1-indexed finish in source (inclusive)
+---@field name    string?                        -- canonical flag this piece names (kind="flag") or feeds (kind="value")
+---@field text    string?                        -- decoded value, quotes and escapes resolved (kind="value")
+---@field eq      integer?                       -- 1-indexed position of the '=' gluing a value on (kind="flag")
+---@field quote   {open:integer,close:integer?}? -- 1-indexed positions of the value quote chars; close=nil when unterminated
+---@field escapes integer[]?                     -- 1-indexed position of each escaping '\' (the '\' of a \" inside a quoted value)
+
+---Lookup key for a flag name: the form in which two spellings of the same flag
+---are equal. Case and the word separators '-' and '_' carry no meaning, so a
+---user who writes --noignore gets the flag they obviously meant.
+---@param name string
+---@return string
+local function _key(name)
+    return (name:lower():gsub("[-_]", ""))
+end
+
 ---@param schema ezpick.queryflags.FlagDef[]
 ---@return table<string, ezpick.queryflags.FlagDef>
 local function _build_map(schema)
     local m = {}
-    for _, def in ipairs(schema) do m[def.name] = def end
+    for _, def in ipairs(schema) do
+        m[_key(def.name)] = def
+        for _, alias in ipairs(def.alias or {}) do m[_key(alias)] = def end
+    end
     return m
 end
 
--- Syntax:
---
---   <token> <token> ... [-- <literal text>]
---
--- Up to the optional "--" separator the input is a flat list of
--- whitespace-separated tokens; flags and query text may appear in any order.
--- Each token is classified:
---   boolean flag:  "--flagname"      → flags.flagname = true  (matching a boolean def)
---   value flag:    "--key value"     → flags.key = value      (or string[] if multi)
---   anything else: query text
--- The query is every non-flag token joined back together with single spaces,
--- in the order written, followed by the raw text after the separator.
--- "--name" is a flag only when `name` is in the schema; an unknown one is
--- ordinary query text, as is a bare "name" without the dashes.
---
--- A value flag takes the *next* token as its value, whatever that token looks
--- like ("--dir --nope" → dir = "--nope"); only the "--" separator is never
--- taken as a value. A value flag with no token after it stays unset.
---
--- Quoting (via ") only applies to a value flag's value, and only when the
--- opening quote is the first character of the token in value position. It lets
--- the value contain spaces:
---   '--path "foo bar"' → value flag whose value contains a space
---   'nope "foo bar"'   → query text 'nope', '"foo' and 'bar"' (no such flag)
--- A '"' anywhere else -- in query text, or in the middle of a value -- is an
--- ordinary literal character. Inside a quoted value a literal double quote is
--- written as \". Text after the closing quote simply continues the value
--- ('--path "foo bar"baz' → value "foo barbaz"), but an unterminated quote is
--- an error.
---
--- There is no escape character. A flag-looking string is searched for verbatim
--- by writing it after the "--" separator: a standalone "--" token ends the
--- flagged section, and the rest of the line is literal query text -- no
--- tokenizing, no flags, no quoting, whitespace kept as typed:
---   '--fixed -- --fixed'   → flag fixed, query text "--fixed"
---   'foo -- --path a  "b"' → query text 'foo --path a  "b"'
--- Only the first standalone "--" separates; one inside a quoted value
--- ('--path "a -- b"') or glued to other text ("--x") is ordinary content. The
--- whitespace between the separator and the literal text is not part of it.
+---@param a string
+---@param b string
+---@return integer
+local function _edit_distance(a, b)
+    local prev = {}
+    for j = 0, #b do prev[j] = j end
+    for i = 1, #a do
+        local cur = { [0] = i }
+        for j = 1, #b do
+            local cost = a:sub(i, i) == b:sub(j, j) and 0 or 1
+            cur[j] = math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        end
+        prev = cur
+    end
+    return prev[#b]
+end
 
----@class ezpick.queryflags.Token
----@field text    string                         -- token text, with the value quote chars stripped
----@field raw     string                         -- verbatim slice of source
----@field start   integer                        -- 1-indexed start in source
----@field finish  integer                        -- 1-indexed finish in source (inclusive)
----@field kind    "flag"|"value"|"text"          -- how the token was classified
----@field name    string?                        -- the flag this token names (kind="flag") or feeds (kind="value")
----@field quote   {open:integer,close:integer?}? -- raw-relative 1-indexed positions of the value quote chars; close=nil when unterminated
----@field escapes integer[]?                     -- raw-relative 1-indexed positions of each escaping '\' (the '\' of a \" inside a quoted value)
+---The flag a misspelling was probably reaching for: a name it is a prefix of,
+---or failing that the nearest one within a couple of typos.
+---@param schema ezpick.queryflags.FlagDef[]
+---@param typed  string
+---@return string?
+local function _did_you_mean(schema, typed)
+    local key = _key(typed)
+    if key == "" then return nil end
 
----Scan up to the first standalone "--": the tokens before it carry the flags,
----everything after it is literal text taken verbatim. A "--" that is part of a
----quoted value or glued to other characters is not a separator.
----
----Classification is done here because it is stateful: only the token right
----after a value flag's name is a value, and only there may a quote open.
----@param str  string
----@param defs table<string, ezpick.queryflags.FlagDef>
----@return ezpick.queryflags.Token[] tokens, {start:integer,finish:integer}? separator, string? literal
-local function _scan(str, defs)
-    local tokens = {}
-    local i      = 1
-    local len    = #str
-    local wanted = nil -- name of the value flag whose value the next token is
+    local best, best_dist
+    for _, def in ipairs(schema) do
+        local cand = _key(def.name)
+        local dist
+        if vim.startswith(cand, key) then
+            dist = 0
+        else
+            dist = _edit_distance(key, cand)
+            if dist > math.min(2, #key) then dist = nil end
+        end
+        if dist and (not best_dist or dist < best_dist) then
+            best, best_dist = def.name, dist
+        end
+    end
+
+    return best
+end
+
+---A "--name" at `i`, if one is written there. Returns nil for a bare "--" and
+---for anything that is not dashed, so the caller can tell the three apart.
+---@param str string
+---@param i   integer
+---@return string? name, integer? finish  -- 1-indexed finish of the dashes+name
+local function _dashed_name(str, i)
+    if str:sub(i, i + 1) ~= _PREFIX then return nil, nil end
+    local name = str:match("^[^%s=]*", i + #_PREFIX)
+    if name == "" then return nil, nil end
+    return name, i + #_PREFIX + #name - 1
+end
+
+---Read a value starting at `i`: a whitespace-delimited run, except that a
+---double quote opening it makes whitespace literal until the quote closes.
+---@param str string
+---@param i   integer
+---@return ezpick.queryflags.Piece piece, integer next_i
+local function _read_value(str, i)
+    local len       = #str
+    local tok_start = i
+    local chars     = {}
+    local escapes   = {}
+    ---@type {open:integer, close:integer?}?
+    local quote     = nil
+    local in_quote  = false
+
+    if str:sub(i, i) == '"' then
+        quote    = { open = i }
+        in_quote = true
+        i        = i + 1
+    end
+
+    while i <= len do
+        local c = str:sub(i, i)
+        if in_quote then
+            -- Inside the quote whitespace is literal, the delimiting quote chars
+            -- are dropped from the decoded text, and \" is a literal double
+            -- quote that does not close the span.
+            if c == "\\" and str:sub(i + 1, i + 1) == '"' then
+                escapes[#escapes + 1] = i
+                chars[#chars + 1]     = '"'
+                i                     = i + 2
+            elseif c == '"' then
+                assert(quote)
+                quote.close = i
+                in_quote    = false
+                i           = i + 1
+            else
+                chars[#chars + 1] = c
+                i                 = i + 1
+            end
+        elseif c:match("%s") then
+            break
+        else
+            chars[#chars + 1] = c
+            i                 = i + 1
+        end
+    end
+
+    -- An unterminated quote is reported, not repaired: dropping it keeps the
+    -- value usable ('--dir "My Doc' → "My Doc") so the result list survives the
+    -- moment between the two quotes being typed.
+    return {
+        kind    = "value",
+        start   = tok_start,
+        finish  = i - 1,
+        text    = table.concat(chars),
+        quote   = quote,
+        escapes = #escapes > 0 and escapes or nil,
+    }, i
+end
+
+---Walk the flagged prefix of `str`, stopping at the query.
+---@param str    string
+---@param defs   table<string, ezpick.queryflags.FlagDef>
+---@param schema ezpick.queryflags.FlagDef[]
+---@return ezpick.queryflags.Piece[] pieces, integer query_start, ezpick.queryflags.Hint[] hints, ezpick.queryflags.FlagDef? pending
+local function _scan(str, defs, schema)
+    local pieces  = {}
+    local hints   = {}
+    local len     = #str
+    local i       = 1
+    ---@type ezpick.queryflags.FlagDef?
+    local pending = nil -- a value flag left waiting for its value at end of input
+
+    ---@param kind ezpick.queryflags.HintKind
+    ---@param s    integer  -- 1-indexed inclusive
+    ---@param e    integer  -- 1-indexed inclusive
+    ---@param msg  string
+    local function hint(kind, s, e, msg)
+        hints[#hints + 1] = { kind = kind, start = s - 1, finish = e, msg = msg }
+    end
+
+    ---@param def ezpick.queryflags.FlagDef
+    ---@return string
+    local function needs_value(def)
+        if def.strict and def.values and #def.values > 0 then
+            return ("%s%s: %s"):format(_PREFIX, def.name, table.concat(def.values, "|"))
+        end
+        return ("%s%s needs a value"):format(_PREFIX, def.name)
+    end
 
     while i <= len do
         while i <= len and str:sub(i, i):match("%s") do i = i + 1 end
         if i > len then break end
 
         local tok_start = i
-        local chars     = {}
-        ---@type {open:integer, close:integer?}?
-        local quote     = nil   -- the value quote span once one has opened
-        local quote_idx = nil   -- index in `chars` where the value quote opened
-        local in_quote  = false -- inside the value quote span
-        local escapes   = {}    -- raw-relative 1-indexed positions of each escaping '\'
 
-        while i <= len do
-            local c = str:sub(i, i)
-            if in_quote then
-                -- inside the value quote: whitespace is literal, the delimiting
-                -- quote char is stripped from `text` but remains in `raw`, and
-                -- \" is a literal double quote that does not close the span.
-                if c == "\\" and str:sub(i + 1, i + 1) == '"' then
-                    table.insert(escapes, i - tok_start + 1)
-                    table.insert(chars, '"')
-                    i = i + 2
-                elseif c == '"' then
-                    quote.close = i - tok_start + 1
-                    in_quote    = false
-                    i           = i + 1
-                else
-                    table.insert(chars, c)
-                    i = i + 1
+        -- The separator ends the flagged section: everything after it is query.
+        if str:sub(i, i + 1) == _PREFIX and (i + 2 > len or str:sub(i + 2, i + 2):match("%s")) then
+            pieces[#pieces + 1] = { kind = "separator", start = i, finish = i + 1 }
+            i = i + 2
+            while i <= len and str:sub(i, i):match("%s") do i = i + 1 end
+            return pieces, i, hints, nil
+        end
+
+        local name, name_end = _dashed_name(str, i)
+        local def            = name and defs[_key(name)]
+        if not def then
+            -- Not a flag, so this is where the query begins. A dashed word that
+            -- merely misses the schema is worth a nudge -- unless it is still
+            -- being typed, when every prefix would look like a typo.
+            if name then
+                local word_end = name_end
+                assert(word_end)
+                if word_end < len then
+                    local suggestion = _did_you_mean(schema, name)
+                    hint("unknown-flag", tok_start, word_end,
+                        suggestion
+                        and ("unknown %s%s, try %s%s"):format(_PREFIX, name, _PREFIX, suggestion)
+                        or ("unknown %s%s"):format(_PREFIX, name))
                 end
-            elseif c:match("%s") then
-                break
-            elseif c == '"' and wanted and not quote and i == tok_start then
-                -- a quote opening a token in value position delimits that value;
-                -- every other quote is an ordinary literal character.
-                quote     = { open = 1 }
-                quote_idx = 1
-                in_quote  = true
-                i         = i + 1
+            end
+            return pieces, tok_start, hints, nil
+        end
+
+        assert(name_end)
+        i = name_end + 1
+
+        ---@type ezpick.queryflags.Piece
+        local flag_piece = { kind = "flag", start = tok_start, finish = name_end, name = def.name }
+        pieces[#pieces + 1] = flag_piece
+
+        if str:sub(i, i) == "=" then
+            -- The glued form is exact: it can carry an empty value, or one that
+            -- would otherwise read as the next flag.
+            flag_piece.eq = i
+            i = i + 1
+            local value
+            value, i = _read_value(str, i)
+            value.name = def.name
+            flag_piece.finish = value.finish
+            if def.type == "boolean" then
+                hint("unexpected-value", tok_start, value.finish,
+                    ("%s%s takes no value"):format(_PREFIX, def.name))
             else
-                table.insert(chars, c)
-                i = i + 1
+                pieces[#pieces + 1] = value
+            end
+        elseif def.type == "value" then
+            local j = i
+            while j <= len and str:sub(j, j):match("%s") do j = j + 1 end
+            local next_name = _dashed_name(str, j)
+            local next_sep  = str:sub(j, j + 1) == _PREFIX and (j + 2 > len or str:sub(j + 2, j + 2):match("%s"))
+            if j > len then
+                -- Nothing typed yet: the slot is open rather than wrong, so this
+                -- doubles as the prompt for what to put there.
+                pending = def
+                hint("missing-value", tok_start, name_end, needs_value(def))
+            elseif next_sep or (next_name and defs[_key(next_name)]) then
+                hint("missing-value", tok_start, name_end, needs_value(def))
+            else
+                local value
+                value, i = _read_value(str, j)
+                value.name = def.name
+                pieces[#pieces + 1] = value
             end
         end
-
-        -- An unterminated quote is not a real delimiter: keep it as a literal
-        -- char instead of silently swallowing it.
-        if in_quote and quote_idx then table.insert(chars, quote_idx, '"') end
-
-        local raw = str:sub(tok_start, i - 1)
-        -- The separator wins over everything, including a pending value: it is
-        -- the one token a value flag never swallows.
-        if raw == _PREFIX then
-            local literal = (str:sub(i):gsub("^%s+", ""))
-            return tokens, { start = tok_start, finish = i - 1 }, literal
-        end
-
-        local text = table.concat(chars)
-        local kind, name
-        if wanted then
-            kind, name, wanted = "value", wanted, nil
-        else
-            local flag = #text > #_PREFIX and text:sub(1, #_PREFIX) == _PREFIX
-                and defs[text:sub(#_PREFIX + 1)]
-            if flag then
-                kind, name = "flag", flag.name
-                if flag.type == "value" then wanted = flag.name end
-            else
-                kind = "text"
-            end
-        end
-
-        tokens[#tokens + 1] = {
-            text    = text,
-            raw     = raw,
-            start   = tok_start,
-            finish  = i - 1,
-            kind    = kind,
-            name    = name,
-            quote   = quote,
-            escapes = #escapes > 0 and escapes or nil,
-        }
     end
 
-    return tokens, nil, nil
+    return pieces, len + 1, hints, pending
+end
+
+---Flag names written in the query, where they are ordinary text. Almost always
+---a flag typed in the habitual place -- the end -- so say so rather than let it
+---silently become part of the search.
+---@param defs  table<string, ezpick.queryflags.FlagDef>
+---@param raw   string
+---@param from  integer  -- 1-indexed start of the query
+---@param hints ezpick.queryflags.Hint[]
+local function _collect_misplaced(defs, raw, from, hints)
+    local i, len = from, #raw
+    while i <= len do
+        while i <= len and raw:sub(i, i):match("%s") do i = i + 1 end
+        if i > len then break end
+
+        local tok_start = i
+        while i <= len and not raw:sub(i, i):match("%s") do i = i + 1 end
+
+        local name, name_end = _dashed_name(raw, tok_start)
+        -- Only an exact flag name counts: "--dir" and "--dir=src" are mistakes,
+        -- but a word merely starting with them is just a word.
+        if name and defs[_key(name)] then
+            assert(name_end)
+            local after = raw:sub(name_end + 1, name_end + 1)
+            if after == "" or after == "=" or after:match("%s") then
+                hints[#hints + 1] = {
+                    kind   = "misplaced-flag",
+                    start  = tok_start - 1,
+                    finish = i - 1,
+                    msg    = ("%s%s must come first"):format(_PREFIX, defs[_key(name)].name),
+                }
+            end
+        end
+    end
 end
 
 ---@param schema ezpick.queryflags.FlagDef[]
 ---@param raw    string
 ---@return ezpick.queryflags.ParseResult
 function M.parse(schema, raw)
-    local defs               = _build_map(schema)
-    local flags              = {}
-    local tokens, _, literal = _scan(raw, defs)
-    local parts              = {}
+    local defs                         = _build_map(schema)
+    local flags                        = {}
+    local pieces, query_start, hints   = _scan(raw, defs, schema)
+    local separated                    = false
 
-    for _, token in ipairs(tokens) do
-        if token.quote and not token.quote.close then
-            return { query = "", flags = {}, error = "Unclosed quote" }
-        end
-    end
+    for _, piece in ipairs(pieces) do
+        if piece.kind == "separator" then
+            separated = true
+        elseif piece.kind == "flag" then
+            -- A value flag's value is a piece of its own; only switches are
+            -- carried by the name itself.
+            if defs[_key(piece.name)].type == "boolean" then flags[piece.name] = true end
+        elseif piece.kind == "value" then
+            local def   = defs[_key(piece.name)]
+            local value = piece.text
 
-    for _, token in ipairs(tokens) do
-        if token.kind == "value" then
-            local def   = defs[token.name]
-            local value = token.text
-            if value ~= "" or def.allow_empty then
-                if def.multi then
-                    flags[token.name] = flags[token.name] or {}
-                    table.insert(flags[token.name], value)
-                else
-                    flags[token.name] = value
+            if piece.quote and not piece.quote.close then
+                hints[#hints + 1] = {
+                    kind   = "unclosed-quote",
+                    start  = piece.quote.open - 1,
+                    finish = piece.finish,
+                    msg    = 'unclosed "',
+                }
+            end
+
+            -- A value written out is a value meant, even an empty one: "--repl="
+            -- is how an empty replacement is asked for.
+            if def.strict and def.values and not vim.tbl_contains(def.values, value) then
+                -- Silent while the value is still being typed at the end of the
+                -- line; a prefix of a valid choice is not yet a wrong one.
+                if piece.finish < #raw then
+                    hints[#hints + 1] = {
+                        kind   = "bad-value",
+                        start  = piece.start - 1,
+                        finish = piece.finish,
+                        msg    = ("%s%s: %s"):format(_PREFIX, def.name, table.concat(def.values, "|")),
+                    }
                 end
             end
-        elseif token.kind == "flag" then
-            -- A value flag's value lives in the next token; only booleans are
-            -- carried by the name token itself.
-            if defs[token.name].type == "boolean" then flags[token.name] = true end
-        elseif token.text ~= "" then
-            parts[#parts + 1] = token.text
+
+            if def.multi then
+                flags[piece.name] = flags[piece.name] or {}
+                table.insert(flags[piece.name], value)
+            else
+                flags[piece.name] = value
+            end
         end
     end
 
-    -- Text after the separator is verbatim: it joins the query as a single
-    -- trailing chunk, keeping its own spacing.
-    if literal and literal ~= "" then parts[#parts + 1] = literal end
+    -- An explicit separator says the flag-looking words ahead are wanted as
+    -- text, so there is nothing left to warn about.
+    if not separated then
+        _collect_misplaced(defs, raw, query_start, hints)
+    end
 
-    return { query = table.concat(parts, " "), flags = flags }
+    table.sort(hints, function(a, b) return a.start < b.start end)
+
+    return {
+        query       = raw:sub(query_start),
+        query_start = query_start,
+        flags       = flags,
+        hints       = hints,
+    }
 end
 
 ---@param schema ezpick.queryflags.FlagDef[]
 ---@param raw    string
 ---@return {start:integer, finish:integer, hl:string}[]
 function M.highlight(schema, raw)
-    local defs                 = _build_map(schema)
-    local hls                  = {}
-    local tokens, separator, _ = _scan(raw, defs)
+    local defs        = _build_map(schema)
+    local hls         = {}
+    local pieces      = _scan(raw, defs, schema)
 
-    for _, token in ipairs(tokens) do
-        local s0 = token.start - 1
-        local e0 = token.finish
+    for _, piece in ipairs(pieces) do
+        local s0 = piece.start - 1
+        local e0 = piece.finish
 
-        if token.kind == "flag" then
-            table.insert(hls, { start = s0, finish = e0, hl = "Keyword" })
-        elseif token.kind == "value" and e0 > s0 then
+        if piece.kind == "separator" then
+            table.insert(hls, { start = s0, finish = e0, hl = "Delimiter" })
+        elseif piece.kind == "flag" then
+            -- `finish` spans a glued value too; the name alone is the keyword.
+            local name_end = piece.eq and (piece.eq - 1) or piece.finish
+            table.insert(hls, { start = s0, finish = name_end, hl = "Keyword" })
+            if piece.eq then
+                table.insert(hls, { start = piece.eq - 1, finish = piece.eq, hl = "Delimiter" })
+            end
+        elseif e0 > s0 then
             table.insert(hls, { start = s0, finish = e0, hl = "String" })
         end
 
@@ -265,33 +482,23 @@ function M.highlight(schema, raw)
         -- highlight them as such. An unterminated quote still highlights its
         -- opening char so the open span is visible. Inserted last so they win
         -- over String/Keyword.
-        local q = token.quote
+        local q = piece.quote
         if q then
-            table.insert(hls, { start = s0 + q.open - 1, finish = s0 + q.open, hl = "Delimiter" })
+            table.insert(hls, { start = q.open - 1, finish = q.open, hl = "Delimiter" })
             if q.close then
-                table.insert(hls, { start = s0 + q.close - 1, finish = s0 + q.close, hl = "Delimiter" })
+                table.insert(hls, { start = q.close - 1, finish = q.close, hl = "Delimiter" })
             end
         end
 
         -- The '\' of an escaped quote (\") is syntax, not content: dim it so the
         -- quote it protects still reads as a literal character.
-        if token.escapes then
-            for _, pos in ipairs(token.escapes) do
-                table.insert(hls, { start = s0 + pos - 1, finish = s0 + pos, hl = "NonText" })
-            end
+        for _, pos in ipairs(piece.escapes or {}) do
+            table.insert(hls, { start = pos - 1, finish = pos, hl = "NonText" })
         end
     end
 
-    -- The separator is syntax; what follows it is literal text and stays plain,
-    -- so a flag-looking word there visibly reads as an ordinary query word.
-    if separator then
-        table.insert(hls, {
-            start  = separator.start - 1,
-            finish = separator.finish,
-            hl     = "Delimiter",
-        })
-    end
-
+    -- The query is plain by construction: nothing past `query_start` is styled,
+    -- so a flag name typed there visibly reads as the ordinary word it became.
     return hls
 end
 
@@ -336,37 +543,22 @@ local function _value_items(def, partial, in_quote)
     return items
 end
 
----The value flag a token leaves waiting for its value, if any.
----@param defs  table<string, ezpick.queryflags.FlagDef>
----@param token ezpick.queryflags.Token?
----@return ezpick.queryflags.FlagDef?
-local function _pending_value(defs, token)
-    if not token or token.kind ~= "flag" or not token.name then return nil end
-    local def = defs[token.name]
-    return def.type == "value" and def or nil
-end
-
----Flag names -- and the separator -- matching the word typed so far.
+---Flag names matching the word typed so far.
 ---@param schema       ezpick.queryflags.FlagDef[]
 ---@param current_word string
 ---@return table[]
 local function _flag_items(schema, current_word)
     local items = {}
 
-    -- The separator is always on offer: everything after it is literal.
-    if vim.startswith(_PREFIX, current_word) then
-        table.insert(items, {
-            word = _PREFIX,
-            abbr = _PREFIX,
-            menu = "[literal text]",
-        })
-    end
-
+    -- The separator is not offered. It matters only for a query that has to
+    -- start with a flag name, and anyone in that corner can type the two
+    -- characters; everyone else would just be reading a cryptic entry sitting
+    -- among the flags they actually want.
     for _, def in ipairs(schema) do
         -- The dashes are part of the flag's written form, so the menu shows
         -- them: what is listed is exactly what accepting the item inserts.
         local word = _PREFIX .. def.name
-        if vim.startswith(word, current_word) then
+        if vim.startswith(_key(word), _key(current_word)) then
             table.insert(items, {
                 word = word,
                 abbr = word,
@@ -387,54 +579,48 @@ function M.get_completions(schema, line, cursor_byte, auto)
     local char_after = line:sub(cursor_byte + 1, cursor_byte + 1)
     if char_after ~= "" and not char_after:match("%s") then return nil end
 
-    local defs              = _build_map(schema)
-    local before            = line:sub(1, cursor_byte)
-    local tokens, separator = _scan(before, defs)
-
-    if separator then
-        -- A separator right under the cursor is still being typed: it is as
-        -- much the start of "--flag" as it is the separator, so keep
-        -- completing. Past a settled separator every character is literal.
-        if separator.finish ~= #before then return nil end
-        -- ... unless a value flag is waiting for its value here: offering a
-        -- flag name would quietly turn the accepted name into that value.
-        if _pending_value(defs, tokens[#tokens]) then return nil end
-        local items = _flag_items(schema, _PREFIX)
-        return #items > 0 and { startcol = separator.start, items = items } or nil
-    end
-
-    local last = tokens[#tokens]
-    -- The token the cursor sits at the end of -- what a completion replaces.
-    -- With none, the cursor is in fresh space after `last`.
-    local word = (last and last.finish == #before) and last or nil
+    local defs                            = _build_map(schema)
+    local before                          = line:sub(1, cursor_byte)
+    local pieces, query_start, _, pending = _scan(before, defs, schema)
+    local last                            = pieces[#pieces]
 
     -- Case 1: on the value of a value flag -- either typing it, or sitting in
     -- the empty slot right after the flag's name. A value is all that can be
     -- written here, so nothing else is offered.
     local value_def, partial, in_quote
-    if word and word.kind == "value" and word.name then
-        value_def = defs[word.name]
-        in_quote  = word.quote ~= nil and word.quote.close == nil
-        -- \" is only an escape inside a quoted value; unquoted it is literal.
-        partial   = in_quote and word.text:sub(2):gsub('\\"', '"') or word.text
-    elseif not word then
-        value_def, partial, in_quote = _pending_value(defs, last), "", false
+    if last and last.kind == "value" and last.finish == #before then
+        value_def = defs[_key(last.name)]
+        in_quote  = last.quote ~= nil and last.quote.close == nil
+        partial   = last.text
+    elseif pending then
+        value_def, partial, in_quote = pending, "", false
     end
 
     if value_def then
         if not (value_def.values or value_def.complete) then return nil end
-        local items = _value_items(value_def, partial, in_quote)
-        return #items > 0 and { startcol = word and word.start or #before + 1, items = items } or nil
+        local startcol = (partial ~= "" or in_quote) and last.start or #before + 1
+        local items    = _value_items(value_def, partial, in_quote)
+        return #items > 0 and { startcol = startcol, items = items } or nil
     end
 
-    -- Case 2: a flag name. A bare word could be query text, so only offer names
-    -- once the leading dash makes the intent explicit, or on an explicit
-    -- (non-auto) trigger.
-    local current_word = word and word.text or ""
+    -- Case 2: a flag name. Only the word the flags could still extend to is
+    -- completable -- once the query has started, a dashed word in it is text and
+    -- completing it would offer a flag that could not take effect there.
+    local word_start = assert(tonumber(before:match("()%S*$")))
+    if query_start < word_start then return nil end
+
+    local current_word = before:sub(word_start)
+    -- Past a settled separator every character is literal. One right under the
+    -- cursor is still being typed: it is as much the start of "--flag" as it is
+    -- the separator, so keep completing.
+    if last and last.kind == "separator" and last.finish ~= #before then return nil end
+
+    -- A bare word could be query text, so only offer names once the leading dash
+    -- makes the intent explicit, or on an explicit (non-auto) trigger.
     if auto and current_word:sub(1, 1) ~= "-" then return nil end
 
     local items = _flag_items(schema, current_word)
-    return #items > 0 and { startcol = word and word.start or #before + 1, items = items } or nil
+    return #items > 0 and { startcol = word_start, items = items } or nil
 end
 
 return M
