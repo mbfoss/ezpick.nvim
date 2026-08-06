@@ -20,6 +20,11 @@ if vim.fn.filereadable(plugin_file) == 0 then
   end
 end
 
+-- Tests must not see the developer's own editing history: a real shada file
+-- carries global marks (`'A`-`'Z`, `'0`-`'9`) that the marks picker would list
+-- alongside the ones a test sets.
+vim.opt.shadafile = "NONE"
+
 vim.opt.rtp:append(".")
 vim.opt.rtp:append(plenary_dir)
 

@@ -141,8 +141,8 @@ Everything after a standalone `--` is taken as literal query text: no flags, no
 quoting, spacing kept as typed. Use it to search for something that would
 otherwise look like a flag.
 
-`files` accepts `--dir`, `--case`, `--fixed`, `--glob`, `--follow`,
-`--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
+`files` accepts `--dir`, `--case`, `--mode` (`fuzzy`|`fixed`|`glob`),
+`--follow`, `--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
 `--replace`, `--regex`, `--word`, `--line`, `--invert`, `--follow`, `--hidden`,
 `--no-ignore`, `--max-depth`. `marks` accepts
 `--global` and `--buffer`, `registers` accepts `--empty`, and the symbol

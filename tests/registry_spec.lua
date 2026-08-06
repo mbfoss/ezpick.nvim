@@ -142,6 +142,7 @@ describe("marks", function()
         local file = vim.fn.tempname() .. ".txt"
         vim.fn.writefile({ "first", "second", "third" }, file)
         vim.cmd("edit " .. vim.fn.fnameescape(file))
+        local bufnr = vim.api.nvim_get_current_buf()
         vim.api.nvim_win_set_cursor(0, { 2, 0 })
         vim.cmd("normal! ma")
         vim.api.nvim_win_set_cursor(0, { 3, 0 })
@@ -153,9 +154,13 @@ describe("marks", function()
         spec.finder("", { buffer = true }, FETCH_OPTS, function(items) locals = items end)
         spec.finder("", { global = true }, FETCH_OPTS, function(items) globals = items end)
 
+        -- Keyed on the file too, so a stray mark from elsewhere cannot stand in
+        -- for one of the marks set above.
         local function has_line(items, lnum)
             for _, item in ipairs(items) do
-                if item.data.lnum == lnum then return true end
+                if item.data.lnum == lnum and (item.data.filepath == file or item.data.bufnr == bufnr) then
+                    return true
+                end
             end
             return false
         end
