@@ -49,7 +49,7 @@ end
 ---@return {filepath:string,relpath:string,filename:string,dir:string,lnum:number,col:number,bufnr:number,type:string,text:string,valid:boolean,qfidx:number}?
 local function read_qf_item(item, rendered_text)
     local bufnr = item.bufnr
-    if not bufnr or bufnr <= 0 or not vim.api.nvim_buf_is_valid(bufnr) then return nil end
+    if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then return nil end
     local filepath = vim.api.nvim_buf_get_name(bufnr)
     local relpath  = fsutil.get_relative_path(filepath) or filepath
     return {
