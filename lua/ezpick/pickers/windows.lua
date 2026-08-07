@@ -12,8 +12,9 @@ local FLAGS = {
 ---@param query string
 ---@param config table window config from `nvim_win_get_config()`
 ---@param current_win number
+---@param current_tab number? tabpage handle, or nil when tab info should be hidden
 ---@return ezpick.Picker.Item?
-local function window_to_picker_item(winid, query, config, current_win)
+local function window_to_picker_item(winid, query, config, current_win, current_tab)
     if not vim.api.nvim_win_is_valid(winid) then return nil end
 
     local bufnr    = vim.api.nvim_win_get_buf(winid)
@@ -24,9 +25,18 @@ local function window_to_picker_item(winid, query, config, current_win)
     if not match then return nil end
 
     local label_chunks = {
-        { string.format("%2d ", winid),                               "Comment"  },
-        { string.format("[%d] ", vim.api.nvim_win_get_number(winid)), "Constant" },
+        { string.format("%2d ", winid), "Comment" },
     }
+
+    if current_tab then
+        local tabpage = vim.api.nvim_win_get_tabpage(winid)
+        table.insert(label_chunks, {
+            string.format("tab %d ", vim.api.nvim_tabpage_get_number(tabpage)),
+            tabpage == current_tab and "Special" or "Comment",
+        })
+    end
+
+    table.insert(label_chunks, { string.format("[%d] ", vim.api.nvim_win_get_number(winid)), "Constant" })
     vim.list_extend(label_chunks, match.chunks)
 
     if config.relative ~= "" then
@@ -55,6 +65,11 @@ function M.spec(opts)
         and vim.api.nvim_tabpage_list_wins(0)
         or vim.api.nvim_list_wins()
     local current_win = vim.api.nvim_get_current_win()
+    -- only annotate with tab info when more than one tab is in play
+    local current_tab = not opts.only_current_tab
+        and #vim.api.nvim_list_tabpages() > 1
+        and vim.api.nvim_get_current_tabpage()
+        or nil
 
     return {
         prompt         = "Switch Window",
@@ -69,7 +84,7 @@ function M.spec(opts)
 
                 if config.hide and not flags.hidden then goto continue end
 
-                local item = window_to_picker_item(winid, query, config, current_win)
+                local item = window_to_picker_item(winid, query, config, current_win, current_tab)
                 if item then table.insert(items, item) end
                 ::continue::
             end
