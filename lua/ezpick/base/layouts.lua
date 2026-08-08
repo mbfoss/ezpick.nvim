@@ -16,7 +16,7 @@ function M.get_horizontal_layout(opts)
     local spacing = has_preview and 2 or 0
     local half_spacing = math.floor(spacing / 2)
 
-    local list_width = math.ceil(cols * _clamp(opts.width_ratio or 0.4, 0.1, 0.8))
+    local list_width = math.ceil(cols * _clamp(opts.width_ratio or 0.4, 0.2, 0.8))
     local preview_width
     if has_preview then
         local width = math.min(list_width * 2, cols)
@@ -58,7 +58,7 @@ function M.get_vertical_layout(opts)
     local has_preview = opts.has_preview
 
     -- vertical layout defaults
-    local width = math.ceil(cols * _clamp(opts.width_ratio or 0.4, 0.1, 0.9))
+    local width = math.ceil(cols * _clamp(opts.width_ratio or 0.4, 0.2, 0.9))
     local total_height = math.ceil(lines * _clamp(opts.height_ratio or 0.6, 0.3, 0.95))
 
     local row = math.floor((lines - total_height) / 2)

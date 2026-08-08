@@ -41,16 +41,16 @@ function M.select(items, opts, on_choice)
         }
     end
 
-    local list_width, height_ratio
+    local width_ratio, height_ratio
     if not preview_item then
-        local list_height
-        list_width, list_height = _compute_dimentions(_cached)
+        local list_width, list_height = _compute_dimentions(_cached)
+        width_ratio = (list_width + 2) / vim.o.columns
         height_ratio = (list_height + 3) / vim.o.lines
     end
 
     picker.open({
         prompt         = opts.prompt and opts.prompt:gsub("%s*:%s*$", "") or "Select",
-        list_width     = list_width,
+        width_ratio     = width_ratio,
         height_ratio   = height_ratio,
         enable_preview = preview_item ~= nil,
         finder         = function(query, _, _, callback)
