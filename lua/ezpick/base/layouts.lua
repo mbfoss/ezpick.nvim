@@ -3,8 +3,10 @@ local M = {}
 ---@alias ezpick.Picker.LayoutKind "horizontal"|"vertical"
 
 ---How the floats are sized, for one preview state. `width_ratio` and
----`height_ratio` are fractions of the editor the whole picker spans -- borders,
----preview and all -- not of any single float.
+---`height_ratio` are fractions of the usable editor area the whole picker spans
+--- -- prompt, list and preview together -- not of any single float. The border
+---ring adds `_BORDER_SPAN` on top; the usable area excludes the command line
+---and the statusline, see `M.usable_lines`.
 ---@class ezpick.Picker.Geometry
 ---@field layout ezpick.Picker.LayoutKind? Arrangement of list and preview (default "horizontal").
 ---@field width_ratio number?
@@ -15,21 +17,79 @@ local M = {}
 ---these only keep the geometry finite when nothing was passed at all.
 local _FALLBACK = { width_ratio = 0.6, height_ratio = 0.7 }
 
+---Rows and columns the outermost border eats. `nvim_open_win` draws a border on
+---the row and column it is handed, so a float reaches one cell past the
+---geometry on every side; the inner borders are already paid for by the gaps
+---between the floats, only the ring around the whole picker is left. Centering
+---has to allow for it or the picker sits two cells low and two cells right.
+local _BORDER_SPAN = 2
+
 ---@type fun(v:number,min:number,max:number):number
 local function _clamp(v, min, max)
     return math.max(min, math.min(max, v))
+end
+
+---Nudge `span` so what is left over after centring it inside `available`
+---divides in two. An odd leftover cannot be split evenly, and the `math.floor`
+---the callers use would hand the spare cell to the bottom (or the right);
+---spending it on the picker instead keeps the two gaps identical. It grows,
+---falling back to shrinking only when there is no room to grow.
+---@param span integer
+---@param available integer
+---@return integer
+local function _even_gaps(span, available)
+    if (available - span - _BORDER_SPAN) % 2 == 0 then
+        return span
+    elseif span + _BORDER_SPAN < available then
+        return span + 1
+    end
+    return math.max(1, span - 1)
+end
+
+---Whether a statusline is drawn at the bottom of the editor. With
+---`laststatus == 1` it only is once the tabpage holds more than one
+---non-floating window -- the picker's own floats must not count.
+---@return boolean
+local function _has_statusline()
+    local laststatus = vim.o.laststatus
+    if laststatus == 0 then
+        return false
+    elseif laststatus ~= 1 then
+        return true
+    end
+
+    local windows = 0
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if vim.api.nvim_win_get_config(win).relative == "" then
+            windows = windows + 1
+            if windows > 1 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+---Editor rows the picker may occupy: everything `vim.o.lines` counts, less the
+---command line and the statusline. Floats are placed relative to the editor,
+---whose row 0 is the top of the screen, so those rows come off the bottom and
+---centering within what is left keeps the picker off the command line.
+---@return integer
+function M.usable_lines()
+    local reserved = vim.o.cmdheight + (_has_statusline() and 1 or 0)
+    return math.max(1, vim.o.lines - reserved)
 end
 
 ---@param opts {has_preview:boolean,height_ratio:number?,width_ratio:number?}
 ---@return ezpick.Picker.Layout
 function M.get_horizontal_layout(opts)
     local cols = vim.o.columns
-    local lines = vim.o.lines
+    local lines = M.usable_lines()
 
     local has_preview = opts.has_preview
     local spacing = has_preview and 2 or 0
 
-    local total_width = math.ceil(cols * _clamp(opts.width_ratio or _FALLBACK.width_ratio, 0.2, 0.95))
+    local total_width = _even_gaps(math.ceil(cols * _clamp(opts.width_ratio or _FALLBACK.width_ratio, 0.2, 0.95)), cols)
     local list_width, preview_width
     if has_preview then
         -- Even split of what the spacing leaves, the odd column going to the preview.
@@ -40,11 +100,11 @@ function M.get_horizontal_layout(opts)
         preview_width = 0
     end
 
-    local total_height = math.ceil(lines * _clamp(opts.height_ratio or _FALLBACK.height_ratio, 0.3, 0.8))
+    local total_height = _even_gaps(math.ceil(lines * _clamp(opts.height_ratio or _FALLBACK.height_ratio, 0.3, 0.8)), lines)
     local list_height = _clamp(total_height - 3, 1, lines)
 
-    local row = math.floor((lines - total_height - 1) / 2)
-    local col = math.floor((cols - (list_width + preview_width + spacing)) / 2)
+    local row = math.floor((lines - total_height - _BORDER_SPAN) / 2)
+    local col = math.floor((cols - (list_width + preview_width + spacing) - _BORDER_SPAN) / 2)
 
     return {
         prompt_row = row,
@@ -68,15 +128,15 @@ end
 ---@return ezpick.Picker.Layout
 function M.get_vertical_layout(opts)
     local cols = vim.o.columns
-    local lines = vim.o.lines
+    local lines = M.usable_lines()
 
     local has_preview = opts.has_preview
 
-    local width = math.ceil(cols * _clamp(opts.width_ratio or _FALLBACK.width_ratio, 0.2, 0.95))
-    local total_height = math.ceil(lines * _clamp(opts.height_ratio or _FALLBACK.height_ratio, 0.3, 0.8))
+    local width = _even_gaps(math.ceil(cols * _clamp(opts.width_ratio or _FALLBACK.width_ratio, 0.2, 0.95)), cols)
+    local total_height = _even_gaps(math.ceil(lines * _clamp(opts.height_ratio or _FALLBACK.height_ratio, 0.3, 0.8)), lines)
 
-    local row = math.floor((lines - total_height) / 2)
-    local col = math.floor((cols - width) / 2)
+    local row = math.floor((lines - total_height - _BORDER_SPAN) / 2)
+    local col = math.floor((cols - width - _BORDER_SPAN) / 2)
 
     -- layout (top to bottom): prompt, gap, list, gap, preview (optional)
 

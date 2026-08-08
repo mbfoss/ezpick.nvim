@@ -2,6 +2,7 @@ local M           = {}
 
 local picker      = require("ezpick.base.picker")
 local pickertools = require("ezpick.base.pickertools")
+local layouts     = require("ezpick.base.layouts")
 
 ---@return number,number
 local function _compute_dimentions(items)
@@ -50,7 +51,7 @@ function M.select(items, opts, on_choice)
         local list_width, list_height = _compute_dimentions(_cached)
         geometry = vim.tbl_extend("force", geometry, {
             width_ratio  = (list_width + 2) / vim.o.columns,
-            height_ratio = (list_height + 3) / vim.o.lines,
+            height_ratio = (list_height + 3) / layouts.usable_lines(),
         })
     end
 
