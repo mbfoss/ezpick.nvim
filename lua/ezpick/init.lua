@@ -1,4 +1,4 @@
-local M        = {}
+local M = {}
 
 -- ---------------------------------------------------------------------------
 -- ezpick
@@ -14,6 +14,7 @@ local M        = {}
 -- ---------------------------------------------------------------------------
 
 ---@class ezpick.Config
+---@field layout ezpick.Picker.LayoutKind? Float arrangement for every picker (default "horizontal").
 ---@field override_ui_select boolean? Route `vim.ui.select` through the picker (default false).
 ---@field auto_complete_flags boolean? Auto-open flag completion while typing (default true).
 
@@ -21,6 +22,7 @@ local M        = {}
 ---@field prompt string
 ---@field flags ezpick.queryflags.FlagDef[]?
 ---@field enable_preview boolean?
+---@field layout ezpick.Picker.LayoutKind? Overrides `config.layout` for this source.
 ---@field height_ratio number?
 ---@field width_ratio number?
 ---@field list_wrap boolean?
@@ -34,6 +36,7 @@ local M        = {}
 local function _get_default_config()
     ---@type ezpick.Config
     return {
+        layout              = "horizontal",
         override_ui_select  = false,
         auto_complete_flags = true,
     }
@@ -58,19 +61,20 @@ local function _do_open(spec, data, initial_query, initial_index, replay_items)
     _last_pick = { spec = spec, data = data, query = initial_query or "", index = initial_index, items = replay_items }
     local replayed = false
     picker.open({
-        prompt             = spec.prompt,
-        flags              = spec.flags,
-        enable_preview     = spec.enable_preview,
-        height_ratio       = spec.height_ratio,
-        width_ratio        = spec.width_ratio,
-        list_wrap          = spec.list_wrap,
-        history_provider   = spec.history_provider,
-        quickfix_formatter = spec.quickfix_formatter,
-        previewer          = spec.previewer,
-        initial_query      = initial_query,
-        initial_index      = initial_index,
+        prompt              = spec.prompt,
+        flags               = spec.flags,
+        enable_preview      = spec.enable_preview,
+        layout              = spec.layout or M.config.layout,
+        height_ratio        = spec.height_ratio,
+        width_ratio         = spec.width_ratio,
+        list_wrap           = spec.list_wrap,
+        history_provider    = spec.history_provider,
+        quickfix_formatter  = spec.quickfix_formatter,
+        previewer           = spec.previewer,
+        initial_query       = initial_query,
+        initial_index       = initial_index,
         auto_complete_flags = M.config.auto_complete_flags,
-        finder             = function(query, flags, fetch_opts, callback)
+        finder              = function(query, flags, fetch_opts, callback)
             -- Serve the cached snapshot for the first (unchanged) query so a
             -- repeated picker opens instantly; any edit falls through to a fresh
             -- finder run.
@@ -89,7 +93,7 @@ local function _do_open(spec, data, initial_query, initial_index, replay_items)
                 callback(items)
             end)
         end,
-        on_close           = function(query, index)
+        on_close            = function(query, index)
             -- Remember the final query and highlighted row so resume restores
             -- both.
             if _last_pick and _last_pick.spec == spec then
@@ -185,7 +189,7 @@ function M.setup(opts)
             local registry   = require("ezpick.registry")
             local queryflags = require("ezpick.base.queryflags")
             local before     = cmd_line:sub(1, cursor_pos)
-            local parts    = vim.split(before, "%s+", { trimempty = true })
+            local parts      = vim.split(before, "%s+", { trimempty = true })
             if #parts <= 1 or (#parts == 2 and not before:match("%s$")) then
                 local keys = registry.keys()
                 table.insert(keys, "resume")

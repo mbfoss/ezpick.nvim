@@ -1,5 +1,6 @@
 local M = {}
 
+---@alias ezpick.Picker.LayoutKind "horizontal"|"vertical"
 
 ---@type fun(v:number,min:number,max:number):number
 local function _clamp(v, min, max)
@@ -59,7 +60,7 @@ function M.get_vertical_layout(opts)
 
     -- vertical layout defaults
     local width = math.ceil(cols * _clamp(opts.width_ratio or 0.4, 0.2, 0.9))
-    local total_height = math.ceil(lines * _clamp(opts.height_ratio or 0.6, 0.3, 0.95))
+    local total_height = math.ceil(lines * _clamp(opts.height_ratio or 0.6, 0.3, 0.8))
 
     local row = math.floor((lines - total_height) / 2)
     local col = math.floor((cols - width) / 2)
@@ -93,7 +94,8 @@ function M.get_vertical_layout(opts)
 
     local usable_height = total_height - prompt_height - (gap * 2)
 
-    local list_height = math.max(1, math.floor(usable_height / 3))
+    -- preview, and the odd row goes to the list.
+    local list_height = math.max(1, math.ceil(usable_height / 2))
     local preview_height = math.max(1, usable_height - list_height)
 
     local list_row = row + prompt_height + gap
@@ -115,6 +117,21 @@ function M.get_vertical_layout(opts)
         preview_width = width,
         preview_height = preview_height,
     }
+end
+
+---@type table<ezpick.Picker.LayoutKind, fun(opts:table):ezpick.Picker.Layout>
+local _builders = {
+    horizontal = M.get_horizontal_layout,
+    vertical = M.get_vertical_layout,
+}
+
+---Geometry for `kind`, falling back to the horizontal layout for anything the
+---table does not name.
+---@param kind ezpick.Picker.LayoutKind?
+---@param opts {has_preview:boolean,height_ratio:number?,width_ratio:number?,list_width:number?}
+---@return ezpick.Picker.Layout
+function M.build(kind, opts)
+    return (_builders[kind] or M.get_horizontal_layout)(opts)
 end
 
 return M

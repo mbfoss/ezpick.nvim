@@ -50,6 +50,7 @@ function M.select(items, opts, on_choice)
 
     picker.open({
         prompt         = opts.prompt and opts.prompt:gsub("%s*:%s*$", "") or "Select",
+        layout         = require("ezpick").config.layout,
         width_ratio     = width_ratio,
         height_ratio   = height_ratio,
         enable_preview = preview_item ~= nil,

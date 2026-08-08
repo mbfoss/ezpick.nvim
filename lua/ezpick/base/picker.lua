@@ -74,6 +74,7 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field previewer ezpick.Picker.AsyncPreviewLoader?
 ---@field history_provider ezpick.Picker.QueryHistoryProvider?
 ---@field quickfix_formatter (fun(data:any):vim.quickfix.entry?)?
+---@field layout ezpick.Picker.LayoutKind? Float arrangement (default "horizontal").
 ---@field height_ratio number?
 ---@field width_ratio number?
 ---@field list_wrap boolean?
@@ -532,11 +533,11 @@ function Picker:relayout(action)
 
 	local has_preview = (self.vwin ~= nil and action ~= "hide_preview") or action == "show_preview"
 
-	self.layout = layouts.get_horizontal_layout {
+	self.layout = layouts.build(self.opts.layout, {
 		has_preview = has_preview,
 		height_ratio = self.opts.height_ratio,
 		width_ratio = self.opts.width_ratio,
-	}
+	})
 
 	self._list_sep_line = string.rep("─", self.layout.list_width)
 
