@@ -13,8 +13,12 @@ local M = {}
 -- `ezpick.registry`. Other plugins add their own with `M.register(name, spec)`.
 -- ---------------------------------------------------------------------------
 
+---A picker is sized by which of these two applies, so a source with nothing to
+---preview can be narrower than one showing a file beside the list. `layout` only
+---arranges a list against a preview, so it is meaningful in `with_preview`.
 ---@class ezpick.Config
----@field layout ezpick.Picker.LayoutKind? Float arrangement for every picker (default "horizontal").
+---@field with_preview ezpick.Picker.Geometry? Sizing while the preview is showing.
+---@field without_preview ezpick.Picker.Geometry? Sizing while it is not.
 ---@field override_ui_select boolean? Route `vim.ui.select` through the picker (default false).
 ---@field auto_complete_flags boolean? Auto-open flag completion while typing (default true).
 
@@ -22,9 +26,9 @@ local M = {}
 ---@field prompt string
 ---@field flags ezpick.queryflags.FlagDef[]?
 ---@field enable_preview boolean?
----@field layout ezpick.Picker.LayoutKind? Overrides `config.layout` for this source.
----@field height_ratio number?
----@field width_ratio number?
+---@field layout ezpick.Picker.LayoutKind? Overrides the configured layout for this source.
+---@field height_ratio number? Overrides the configured height for this source, previewing or not.
+---@field width_ratio number? Overrides the configured width for this source, previewing or not.
 ---@field list_wrap boolean?
 ---@field history_provider ezpick.Picker.QueryHistoryProvider?
 ---@field quickfix_formatter (fun(data:any):vim.quickfix.entry?)?
@@ -36,7 +40,15 @@ local M = {}
 local function _get_default_config()
     ---@type ezpick.Config
     return {
-        layout              = "horizontal",
+        with_preview        = {
+            layout       = "horizontal",
+            width_ratio  = 0.8,
+            height_ratio = 0.7,
+        },
+        without_preview     = {
+            width_ratio  = 0.6,
+            height_ratio = 0.7,
+        },
         override_ui_select  = false,
         auto_complete_flags = true,
     }
@@ -44,6 +56,21 @@ end
 
 ---@type ezpick.Config
 M.config = _get_default_config()
+
+---Sizing for one source: the configured geometry for the preview state it opens
+---in, with whatever the source states itself folded over it.
+---@param spec ezpick.PickerSpec
+---@return ezpick.Picker.Geometry
+local function _resolve_geometry(spec)
+    local base = spec.enable_preview and M.config.with_preview or M.config.without_preview
+    -- Absent keys are absent from the table, so this only overrides what the
+    -- spec actually set.
+    return vim.tbl_extend("force", base or {}, {
+        layout       = spec.layout,
+        width_ratio  = spec.width_ratio,
+        height_ratio = spec.height_ratio,
+    })
+end
 
 ---The most recent picker invocation, replayed by M.resume(). Holds the
 ---resolved spec and its setup data so repeat reopens without re-running setup,
@@ -60,13 +87,14 @@ local function _do_open(spec, data, initial_query, initial_index, replay_items)
     local picker = require("ezpick.base.picker")
     _last_pick = { spec = spec, data = data, query = initial_query or "", index = initial_index, items = replay_items }
     local replayed = false
+    local geometry = _resolve_geometry(spec)
     picker.open({
         prompt              = spec.prompt,
         flags               = spec.flags,
         enable_preview      = spec.enable_preview,
-        layout              = spec.layout or M.config.layout,
-        height_ratio        = spec.height_ratio,
-        width_ratio         = spec.width_ratio,
+        layout              = geometry.layout,
+        width_ratio         = geometry.width_ratio,
+        height_ratio        = geometry.height_ratio,
         list_wrap           = spec.list_wrap,
         history_provider    = spec.history_provider,
         quickfix_formatter  = spec.quickfix_formatter,

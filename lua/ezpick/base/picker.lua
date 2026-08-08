@@ -74,9 +74,9 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field previewer ezpick.Picker.AsyncPreviewLoader?
 ---@field history_provider ezpick.Picker.QueryHistoryProvider?
 ---@field quickfix_formatter (fun(data:any):vim.quickfix.entry?)?
----@field layout ezpick.Picker.LayoutKind? Float arrangement (default "horizontal").
+---@field layout ezpick.Picker.LayoutKind? Arrangement of list and preview (default "horizontal").
+---@field width_ratio number? Fraction of the editor the whole picker spans.
 ---@field height_ratio number?
----@field width_ratio number?
 ---@field list_wrap boolean?
 ---@field list_wrap_indent number? Spaces to indent wrapped list lines. Defaults to 0 while separators are shown, else 2.
 ---@field initial_query  string?

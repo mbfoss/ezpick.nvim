@@ -41,18 +41,24 @@ function M.select(items, opts, on_choice)
         }
     end
 
-    local width_ratio, height_ratio
+    local config   = require("ezpick").config
+    local geometry = (preview_item and config.with_preview or config.without_preview) or {}
+
+    -- A select with nothing to preview shrinks to its own contents rather than
+    -- taking the configured share of the editor.
     if not preview_item then
         local list_width, list_height = _compute_dimentions(_cached)
-        width_ratio = (list_width + 2) / vim.o.columns
-        height_ratio = (list_height + 3) / vim.o.lines
+        geometry = vim.tbl_extend("force", geometry, {
+            width_ratio  = (list_width + 2) / vim.o.columns,
+            height_ratio = (list_height + 3) / vim.o.lines,
+        })
     end
 
     picker.open({
         prompt         = opts.prompt and opts.prompt:gsub("%s*:%s*$", "") or "Select",
-        layout         = require("ezpick").config.layout,
-        width_ratio     = width_ratio,
-        height_ratio   = height_ratio,
+        layout         = geometry.layout,
+        width_ratio    = geometry.width_ratio,
+        height_ratio   = geometry.height_ratio,
         enable_preview = preview_item ~= nil,
         finder         = function(query, _, _, callback)
             local results = {}

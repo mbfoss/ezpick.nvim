@@ -45,6 +45,17 @@ no arguments is valid.
 
 ```lua
 require("ezpick").setup({
+  -- Sizing, picked per source by whether it has a preview to show. The ratios
+  -- are fractions of the editor the whole picker spans, borders and all.
+  with_preview        = {
+    layout       = "horizontal", -- or "vertical", stacking the preview below the list
+    width_ratio  = 0.8,
+    height_ratio = 0.7,
+  },
+  without_preview     = {
+    width_ratio  = 0.6,
+    height_ratio = 0.7,
+  },
   override_ui_select  = false, -- opt in to route vim.ui.select through the picker
   auto_complete_flags = true, -- auto-open flag completion while typing
 })
