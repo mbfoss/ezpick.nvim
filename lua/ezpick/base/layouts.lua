@@ -46,28 +46,12 @@ local function _even_gaps(span, available)
     return math.max(1, span - 1)
 end
 
----Whether a statusline is drawn at the bottom of the editor. With
----`laststatus == 1` it only is once the tabpage holds more than one
----non-floating window -- the picker's own floats must not count.
+--- Whether a statusline is drawn at the bottom of the editor. With
+--- `laststatus == 1`, assume no status line (for performance)
 ---@return boolean
 local function _has_statusline()
     local laststatus = vim.o.laststatus
-    if laststatus == 0 then
-        return false
-    elseif laststatus ~= 1 then
-        return true
-    end
-
-    local windows = 0
-    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        if vim.api.nvim_win_get_config(win).relative == "" then
-            windows = windows + 1
-            if windows > 1 then
-                return true
-            end
-        end
-    end
-    return false
+    return laststatus ~= 0 and laststatus ~=1
 end
 
 ---Editor rows the picker may occupy: everything `vim.o.lines` counts, less the
