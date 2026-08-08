@@ -296,7 +296,7 @@ local function _rank_items(items)
 	return items
 end
 
----@param item ezpick.picker.ListItem
+---@param item ezpick.picker.ListItem|ezpick.Picker.Item
 local function _item_label(item)
 	if not item.label_chunks then return "" end
 	local parts = {}
@@ -318,6 +318,7 @@ end
 ---@field pwin integer?
 ---@field lwin integer?
 ---@field vwin integer?
+---@field pwin_augroup number?
 ---@field spinner ezpick.util.Spinner?
 ---@field closed boolean
 ---@field list_items ezpick.picker.ListItem[]
@@ -575,6 +576,7 @@ function Picker:relayout(action)
 		vim.wo[self.pwin].wrap = false
 
 		assert(type(pwin_augroup) == "number")
+		self.pwin_augroup = pwin_augroup
 		vim.api.nvim_create_autocmd("WinEnter", {
 			group = pwin_augroup,
 			callback = function(_)
@@ -1294,6 +1296,11 @@ function Picker:close(selected_data)
 	self.closed = true
 	if _active_picker == self then _active_picker = nil end
 
+	-- The floats outlive this call by a tick (see the stopinsert note below),
+	-- so their autocmds go now: each one asserts a picker that is still open.
+	if self.pwin_augroup then pcall(vim.api.nvim_del_augroup_by_id, self.pwin_augroup) end
+	self.pwin_augroup = nil
+
 	self:stop_spinner()
 
 	self.preview_timer = common.stop_and_close_timer(self.preview_timer)
@@ -1307,18 +1314,6 @@ function Picker:close(selected_data)
 
 	self:release_external_preview_buf()
 
-	for _, w in pairs({ self.pwin, self.lwin, self.vwin }) do
-		if vim.api.nvim_win_is_valid(w) then
-			vim.api.nvim_win_close(w, true)
-		end
-	end
-
-	for _, b in pairs({ self.pbuf, self.lbuf, self.vbuf }) do
-		if vim.api.nvim_buf_is_valid(b) then
-			vim.api.nvim_buf_delete(b, { force = true })
-		end
-	end
-
 	if self.opts.history_provider then
 		local entry = self.query_text
 		if entry ~= "" and entry ~= self.history[#self.history] then
@@ -1329,8 +1324,23 @@ function Picker:close(selected_data)
 		end
 	end
 
+	-- Leaving insert mode steps the cursor one column left, and `:stopinsert`
+	-- only takes effect once this returns -- so the floats have to outlive it,
+	-- or that step lands in the window the focus falls back to.
 	vim.cmd("stopinsert!")
 	vim.schedule(function()
+		for _, w in pairs({ self.pwin, self.lwin, self.vwin }) do
+			if vim.api.nvim_win_is_valid(w) then
+				vim.api.nvim_win_close(w, true)
+			end
+		end
+
+		for _, b in pairs({ self.pbuf, self.lbuf, self.vbuf }) do
+			if vim.api.nvim_buf_is_valid(b) then
+				vim.api.nvim_buf_delete(b, { force = true })
+			end
+		end
+
 		self.callback(selected_data)
 	end)
 end
