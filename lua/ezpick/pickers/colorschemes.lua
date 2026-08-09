@@ -56,6 +56,12 @@ function M.spec()
     return {
         prompt         = "Colorschemes",
         enable_preview = true,
+        -- Open on the scheme in use, so moving away is what changes anything.
+        initial_cursor = function(items)
+            for row, item in ipairs(items) do
+                if item.data.name == original then return row end
+            end
+        end,
         previewer      = function(data, _, callback)
             local err = apply_scheme(data.name)
             if err then
@@ -77,9 +83,6 @@ function M.spec()
                     table.insert(items, {
                         label_chunks = match.chunks,
                         score        = match.score,
-                        -- Open on the scheme in use, so moving away is what
-                        -- changes anything.
-                        initial      = (query == "" and name == original) or nil,
                         data         = { name = name },
                     })
                 end

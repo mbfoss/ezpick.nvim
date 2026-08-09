@@ -33,7 +33,7 @@ function M.spec()
     for i = #jumplist, 1, -1 do
         local data = read_jump_item(jumplist[i])
         if data then
-            data.initial = i == current
+            data.jumpidx = i
             table.insert(entries, data)
         end
     end
@@ -42,6 +42,12 @@ function M.spec()
     return {
         prompt         = "Jumplist",
         enable_preview = true,
+        -- Open on the jump the list is parked at, the one <C-o> would step off.
+        initial_cursor = function(items)
+            for row, item in ipairs(items) do
+                if item.data.jumpidx == current then return row end
+            end
+        end,
         finder         = function(query, _, _, callback)
             local items = {}
             for _, data in ipairs(entries) do
@@ -55,12 +61,12 @@ function M.spec()
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = match.chunks,
-                        initial      = data.initial,
                         data         = {
                             filepath = data.filepath,
                             bufnr    = data.bufnr,
                             lnum     = data.lnum,
                             col      = data.col,
+                            jumpidx  = data.jumpidx,
                         },
                     })
                 end

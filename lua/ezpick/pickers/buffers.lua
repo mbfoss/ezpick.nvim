@@ -15,9 +15,8 @@ local FLAGS       = {
 ---@param bufnr number
 ---@param query string
 ---@param flags table
----@param current_buf number
 ---@return ezpick.Picker.Item?
-local function buffer_to_picker_item(bufnr, query, flags, current_buf)
+local function buffer_to_picker_item(bufnr, query, flags)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     local label
     if bufname ~= "" then
@@ -58,7 +57,6 @@ local function buffer_to_picker_item(bufnr, query, flags, current_buf)
         label_chunks = label_chunks,
         score        = match.score,
         data         = { bufnr = bufnr, lnum = lnum, col = col },
-        initial      = bufnr == current_buf or nil,
     }
 end
 
@@ -72,6 +70,11 @@ function M.spec()
         prompt         = "Open Buffers",
         flags          = FLAGS,
         enable_preview = true,
+        initial_cursor = function(items)
+            for row, item in ipairs(items) do
+                if item.data.bufnr == current_buf then return row end
+            end
+        end,
         finder         = function(query, flags, _, callback)
             local include_unloaded = flags.unloaded
             local include_unlisted = flags.unlisted
@@ -80,7 +83,7 @@ function M.spec()
                 if (include_unloaded or vim.api.nvim_buf_is_loaded(bufnr))
                     and (include_unlisted or vim.bo[bufnr].buflisted)
                 then
-                    local item = buffer_to_picker_item(bufnr, query, flags, current_buf)
+                    local item = buffer_to_picker_item(bufnr, query, flags)
                     if item then table.insert(items, item) end
                 end
             end

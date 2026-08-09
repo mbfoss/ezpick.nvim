@@ -79,6 +79,75 @@ describe("ranking", function()
     end)
 end)
 
+describe("initial cursor", function()
+    local resolve = require("ezpick.base.picker")._resolve_initial_cursor
+
+    local ITEMS = { { data = { name = "a" } }, { data = { name = "b" } }, { data = { name = "c" } } }
+
+    it("returns nothing when the spec asks for no particular row", function()
+        assert.is_nil(resolve(ITEMS, nil))
+    end)
+
+    it("takes a plain row as given", function()
+        assert.equals(2, resolve(ITEMS, 2))
+    end)
+
+    it("calls the function form with the ranked items", function()
+        local seen
+        local row = resolve(ITEMS, function(items)
+            seen = vim.tbl_map(function(item) return item.data.name end, items)
+            return 3
+        end)
+        assert.same({ "a", "b", "c" }, seen)
+        assert.equals(3, row)
+    end)
+
+    it("passes a function's empty answer through, leaving the cursor at the top", function()
+        assert.is_nil(resolve(ITEMS, function() return nil end))
+    end)
+end)
+
+describe("initial cursor, per source", function()
+    it("colorschemes opens on the scheme in use", function()
+        local spec = require("ezpick.pickers.colorschemes").spec()
+        local items
+        spec.finder("", {}, FETCH_OPTS, function(new_items) items = new_items end)
+
+        local row = spec.initial_cursor(items)
+        assert.is_not_nil(row)
+        assert.equals(vim.g.colors_name or "default", items[row].data.name)
+    end)
+
+    it("buffer_lines opens on the line holding the cursor", function()
+        local bufnr = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "alpha", "beta", "gamma" })
+        vim.api.nvim_win_set_buf(0, bufnr)
+        vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+        local spec = require("ezpick.pickers.lines").spec({ bufnr = bufnr })
+        local items
+        spec.finder("", {}, FETCH_OPTS, function(new_items) items = new_items end)
+
+        assert.equals(3, items[spec.initial_cursor(items)].data.lnum)
+    end)
+
+    it("qflist opens on the entry the list is parked at", function()
+        local path = vim.fn.tempname()
+        vim.fn.writefile({ "one", "two", "three" }, path)
+        vim.cmd.edit(path)
+        vim.fn.setqflist(vim.tbl_map(function(i)
+            return { filename = path, lnum = i, col = 1, text = "entry " .. i }
+        end, { 1, 2, 3 }))
+        vim.fn.setqflist({}, "r", { idx = 2 })
+
+        local spec = require("ezpick.pickers.qflist").spec({})
+        local items
+        spec.finder("", {}, FETCH_OPTS, function(new_items) items = new_items end)
+
+        assert.equals(2, items[spec.initial_cursor(items)].data.qfidx)
+    end)
+end)
+
 describe("buffer_lines", function()
     it("lists the non-blank lines of the current buffer, numbered", function()
         local bufnr = vim.api.nvim_create_buf(false, true)

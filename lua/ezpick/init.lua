@@ -35,6 +35,7 @@ local M = {}
 ---@field setup (fun(callback:fun(data:table?)))?
 ---@field finder fun(query:string, flags:table, fetch_opts:ezpick.Picker.FetcherOpts, callback:fun(items:ezpick.Picker.Item[]?)):fun()?
 ---@field previewer ezpick.Picker.AsyncPreviewLoader?
+---@field initial_cursor (integer|fun(items:ezpick.Picker.Item[]):integer?)? Row to highlight when the picker opens: a 1-based index into the ranked list, or a function that finds one in it. Resuming a picker overrides it with the row left behind.
 ---@field on_confirm fun(data:ezpick.picker.ItemData?)
 
 local function _get_default_config()
@@ -100,7 +101,9 @@ local function _do_open(spec, data, initial_query, initial_index, replay_items)
         quickfix_formatter  = spec.quickfix_formatter,
         previewer           = spec.previewer,
         initial_query       = initial_query,
-        initial_index       = initial_index,
+        -- Resuming restores the row the picker was left on, which is a more
+        -- specific intent than whatever the source would open on from scratch.
+        initial_cursor      = initial_index or spec.initial_cursor,
         auto_complete_flags = M.config.auto_complete_flags,
         finder              = function(query, flags, fetch_opts, callback)
             -- Serve the cached snapshot for the first (unchanged) query so a

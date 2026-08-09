@@ -11,10 +11,9 @@ local FLAGS = {
 ---@param winid number
 ---@param query string
 ---@param config table window config from `nvim_win_get_config()`
----@param current_win number
 ---@param current_tab number? tabpage handle, or nil when tab info should be hidden
 ---@return ezpick.Picker.Item?
-local function window_to_picker_item(winid, query, config, current_win, current_tab)
+local function window_to_picker_item(winid, query, config, current_tab)
     if not vim.api.nvim_win_is_valid(winid) then return nil end
 
     local bufnr    = vim.api.nvim_win_get_buf(winid)
@@ -53,7 +52,6 @@ local function window_to_picker_item(winid, query, config, current_win, current_
         label_chunks = label_chunks,
         score        = match.score,
         data         = { winid = winid, bufnr = bufnr, lnum = cursor[1], col = cursor[2] },
-        initial      = winid == current_win or nil,
     }
 end
 
@@ -75,6 +73,11 @@ function M.spec(opts)
         prompt         = "Switch Window",
         flags          = FLAGS,
         enable_preview = true,
+        initial_cursor = function(items)
+            for row, item in ipairs(items) do
+                if item.data.winid == current_win then return row end
+            end
+        end,
         finder         = function(query, flags, _, callback)
             local items = {}
             for _, winid in ipairs(windows) do
@@ -84,7 +87,7 @@ function M.spec(opts)
 
                 if config.hide and not flags.hidden then goto continue end
 
-                local item = window_to_picker_item(winid, query, config, current_win, current_tab)
+                local item = window_to_picker_item(winid, query, config, current_tab)
                 if item then table.insert(items, item) end
                 ::continue::
             end

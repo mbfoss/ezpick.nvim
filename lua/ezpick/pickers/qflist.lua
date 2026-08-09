@@ -2,6 +2,7 @@ local M            = {}
 
 local pickertools  = require("ezpick.base.pickertools")
 local fsutil       = require("ezpick.util.fsutil")
+local ui           = require("ezpick.util.ui")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS        = {
@@ -136,10 +137,17 @@ function M.spec(opts)
         return nil
     end
 
+    ---@type ezpick.PickerSpec
     return {
         prompt             = list_label .. " Items",
         flags              = FLAGS,
         enable_preview     = true,
+        -- Open on the entry the list is parked at, the one :cc would jump to.
+        initial_cursor     = function(items)
+            for row, item in ipairs(items) do
+                if item.data.qfidx == current_idx then return row end
+            end
+        end,
         finder             = function(query, flags, _, callback)
             local items = {}
             for _, data in ipairs(entries) do
@@ -178,7 +186,6 @@ function M.spec(opts)
                         label_chunks = chunks,
                         virt_line    = virt_line,
                         data         = data,
-                        initial      = data.qfidx == current_idx,
                     })
                 end
                 ::continue::
@@ -190,11 +197,14 @@ function M.spec(opts)
         end,
         on_confirm         = function(data)
             if not data then return end
+            -- Keep the list's current index in sync (what :cc/:ll would do) so
+            -- :cnext/:cprev continue from the picked item, then jump ourselves.
             if is_loclist then
-                vim.fn.win_execute(winid, "ll " .. data.qfidx)
+                vim.fn.setloclist(winid, {}, "r", { idx = data.qfidx })
             else
-                vim.cmd("cc " .. data.qfidx)
+                vim.fn.setqflist({}, "r", { idx = data.qfidx })
             end
+            ui.smart_open_file(data.filepath, data.lnum, data.col)
         end,
     }
 end

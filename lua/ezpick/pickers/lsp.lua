@@ -424,10 +424,21 @@ function M.document_symbols_spec(opts)
     local opts_kind_filter = {}
     for _, k in ipairs(opts.kinds or {}) do opts_kind_filter[k:lower()] = true end
 
+    -- The symbol enclosing the cursor, picked out once the server answers. The
+    -- finder hands each item this very table as its data, so identity is enough
+    -- to find its row later.
+    local initial_data     = nil
+
     return {
         prompt         = opts.prompt or "Document Symbols",
         flags          = SYMBOL_FLAGS,
         enable_preview = true,
+        initial_cursor = function(items)
+            if not initial_data then return nil end
+            for row, item in ipairs(items) do
+                if item.data == initial_data then return row end
+            end
+        end,
         setup          = function(callback)
             vim.lsp.buf_request(0, "textDocument/documentSymbol", params, function(err, result, _)
                 if err or not result then
@@ -464,7 +475,7 @@ function M.document_symbols_spec(opts)
                         best_lnum = lnum
                     end
                 end
-                if best then best.initial = true end
+                initial_data = best and best.data or nil
 
                 if #items == 0 then
                     vim.notify("No symbols found")

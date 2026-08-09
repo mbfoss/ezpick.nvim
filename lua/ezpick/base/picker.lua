@@ -35,7 +35,6 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field label_chunks {[1]:string,[2]:string?}[]?
 ---@field virt_line? {[1]:string,[2]:string?}[] Single virtual line rendered below the entry.
 ---@field data ezpick.picker.ItemData
----@field initial boolean?
 ---@field score number? Match quality, as reported by `match_label`. Ranked descending; see `_rank_items`.
 
 ---@class ezpick.picker.ListItem
@@ -80,7 +79,7 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field list_wrap boolean?
 ---@field list_wrap_indent number? Spaces to indent wrapped list lines. Defaults to 0 while separators are shown, else 2.
 ---@field initial_query  string?
----@field initial_index integer? 1-based list row to select on the first fetch (unless the finder marks an item `initial`).
+---@field initial_cursor (integer|fun(items:ezpick.Picker.Item[]):integer?)? Row to select on the first populated fetch, as a 1-based index into the ranked list or a function that finds one. Spent by that fetch; later queries start at the top.
 ---@field auto_complete_flags boolean? Auto-open flag completion while typing (default true).
 ---@field on_close fun(query:string, index:integer?)? Called when the picker closes, with the final raw prompt text and the highlighted item's 1-based list row.
 
@@ -370,6 +369,8 @@ function Picker:init(opts, callback)
 
 	self.async_fetch_context   = 0
 	self.async_fetch_cancel    = nil
+
+	self._set_init_cursor       = true
 
 	self.async_preview_context = 0
 	self.async_preview_cancel  = nil
@@ -1115,10 +1116,22 @@ function Picker:set_items(items)
 	vim.wo[self.lwin].cursorline = #self.list_items > 0
 end
 
+-- Resolve which row the cursor starts on. The function form is handed the items
+-- in their final ranked order, which is the only order a row number means
+-- anything in, and rows map 1:1 onto `set_items`.
+---@param items ezpick.Picker.Item[] ranked, in final list order
+---@param initial_cursor (integer|fun(items:ezpick.Picker.Item[]):integer?)?
+---@return integer? row 1-based, nil to leave the cursor at the top
+local function _resolve_initial_cursor(items, initial_cursor)
+	if type(initial_cursor) == "function" then return initial_cursor(items) end
+	return initial_cursor
+end
+
 function Picker:run_fetch()
 	local query_text   = self.query_text
 	self.current_query = query_text
 
+	---@type ezpick.Picker.FetcherOpts
 	local fetch_opts = {
 		list_width  = math.max(1, self.layout.list_width - 2),
 		list_height = math.max(1, self.layout.list_height - 2),
@@ -1170,28 +1183,13 @@ function Picker:run_fetch()
 			self:stop_spinner()
 			if new_items and #new_items > 0 then
 				new_items = _rank_items(new_items)
-				local initial_data
-				for _, item in ipairs(new_items) do
-					if item.initial then
-						initial_data = item.data
-						break
-					end
+				local target_row = 1
+				if self._set_init_cursor then
+					self._set_init_cursor = false
+					target_row = _clamp(
+						_resolve_initial_cursor(new_items, self.opts.initial_cursor) or 1, 1, #new_items)
 				end
 				self:set_items(new_items)
-				local target_row = 1
-				if initial_data then
-					for i, li in ipairs(self.list_items) do
-						if li.data == initial_data then
-							target_row = i
-							break
-						end
-					end
-				elseif self.opts.initial_index then
-					-- Consume the stored index so it only steers the first fetch;
-					-- later queries reset to the top-ranked item.
-					target_row = _clamp(self.opts.initial_index, 1, #self.list_items)
-					self.opts.initial_index = nil
-				end
 				self:move_cursor(target_row, true, true)
 			else
 				self:clear_list()
@@ -1476,6 +1474,9 @@ end
 
 --- Exposed for the test suite; `run_fetch` is the only caller in anger.
 M._rank_items = _rank_items
+
+--- Exposed for the test suite.
+M._resolve_initial_cursor = _resolve_initial_cursor
 
 ---@param opts ezpick.Picker.opts
 ---@param callback ezpick.Picker.Callback

@@ -69,6 +69,13 @@ function M.spec(opts)
         prompt         = "Buffer Lines",
         enable_preview = true,
         previewer      = pickertools.buffer_preview,
+        -- Open on the line the cursor is sitting on, so the picker starts where
+        -- the reader already is.
+        initial_cursor = function(items)
+            for row, item in ipairs(items) do
+                if item.data.lnum == start_lnum then return row end
+            end
+        end,
         finder         = function(query, _, _, callback)
             local items = {}
             for _, entry in ipairs(entries) do
@@ -82,9 +89,6 @@ function M.spec(opts)
                     -- column stays monotonic.
                     table.insert(items, {
                         label_chunks = chunks,
-                        -- Only steer the unfiltered list to the cursor; once a
-                        -- query narrows it, its first match is the better start.
-                        initial      = (query == "" and entry.lnum == start_lnum) or nil,
                         data         = {
                             bufnr    = bufnr,
                             filepath = filepath ~= "" and filepath or nil,
