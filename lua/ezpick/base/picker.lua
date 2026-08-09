@@ -1,5 +1,5 @@
 local Spinner            = require("ezpick.util.Spinner")
-local common             = require("ezpick.util.timer")
+local timer              = require("ezpick.util.timer")
 local ui                 = require("ezpick.util.ui")
 local floatwin           = require("ezpick.util.floatwin")
 local layouts            = require("ezpick.base.layouts")
@@ -54,9 +54,7 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field load fun():string[]
 ---@field store fun(hist:string[])?
 
----@alias ezpick.Picker.Fetcher fun(query:string,opts:ezpick.Picker.FetcherOpts):ezpick.Picker.Item[]?,number?
 ---@alias ezpick.Picker.Finder fun(query:string,flags:table,opts:ezpick.Picker.FetcherOpts,callback:fun(new_items:ezpick.Picker.Item[]?)):fun()?
----@alias ezpick.Picker.QueryHighlighter fun(query:string): {start:integer, finish:integer, hl:string}[]
 
 ---@class ezpick.Picker.AsyncPreviewOpts
 ---@field viewport_width number
@@ -126,13 +124,16 @@ end
 local function _show_help()
 	local help_text = [[
 `<CR>`        Confirm
-`<Esc>`       Close picker
+`<C-c>`       Close picker
+`<Esc>`       Leave insert mode, then close picker
 `<C-n>`       Next item
 `<C-p>`       Previous item
 `<C-d>`       Scroll down half page
 `<C-u>`       Scroll up half page
 `<C-j>`       Next search history entry
 `<C-k>`       Previous search history entry
+`j` / `k`     Next / previous history entry (normal mode)
+`<C-Space>`   Complete flags
 `<C-q>`       Send results to quickfix list
 `<C-r><C-w>`  Insert original <cword>
 `g?`          Show help
@@ -214,9 +215,12 @@ end
 ---@param height number
 ---@return string[]
 local function _center_for_previewer(msg, width, height)
-	local pad_left = math.max(0, math.floor((width - #msg) / 2) + 1)
+	-- Display cells, not bytes: an error message naming a non-ASCII path would
+	-- otherwise be pushed off centre by one column per multibyte character.
+	local pad_left = math.max(0, math.floor((width - vim.fn.strdisplaywidth(msg)) / 2))
 	local centered = string.rep(" ", pad_left) .. msg
-	local pad_top = math.max(0, math.floor((height + 1) / 2))
+	-- `height` is the content area, and the message is one of its rows.
+	local pad_top = math.max(0, math.floor((height - 1) / 2))
 
 	local lines = {}
 	for _ = 1, pad_top do
@@ -248,10 +252,13 @@ end
 ---@param entry string
 ---@return string
 local function _decode_history(entry)
-	-- Older entries were stored as JSON `{q=..,f=..}`; decode them for compatibility.
+	-- Older entries were stored as JSON `{q=..,f=..}`; decode them for
+	-- compatibility. Only an object actually carrying `q` is one of those: a
+	-- query that merely happens to parse as JSON -- `[1,2]`, `{}` -- is still
+	-- just a query, and must come back verbatim rather than as "".
 	local ok, t = pcall(vim.json.decode, entry)
-	if ok and type(t) == "table" then
-		return t.q or ""
+	if ok and type(t) == "table" and type(t.q) == "string" then
+		return t.q
 	end
 	return entry
 end
@@ -275,14 +282,22 @@ local function _rank_items(items)
 	local n = #items
 	if n < 2 then return items end
 
-	local order  = tbl_new(0, n)
+	-- Answered before the index map is built. An unscored list is what an empty
+	-- query yields, which is also the longest list a source ever hands over, so
+	-- it must not pay to fill in a map it is about to walk away from.
 	local scored = false
 	for i = 1, n do
-		local item = items[i]
-		order[item] = i
-		if item.score ~= nil then scored = true end
+		if items[i].score ~= nil then
+			scored = true
+			break
+		end
 	end
 	if not scored then return items end
+
+	local order = tbl_new(0, n)
+	for i = 1, n do
+		order[items[i]] = i
+	end
 
 	table.sort(items, function(a, b)
 		local sa, sb = a.score, b.score
@@ -296,14 +311,25 @@ local function _rank_items(items)
 	return items
 end
 
+---A label occupies one buffer line, and `nvim_buf_set_lines` refuses a string
+---with a newline in it. The swap is byte for byte, so the byte columns the
+---highlight chunks are placed at are unaffected by it.
+---@param text string
+---@return string
+local function _one_line(text)
+	if text:find("\n", 1, true) then return (text:gsub("\n", " ")) end
+	return text
+end
+
 ---@param item ezpick.picker.ListItem|ezpick.Picker.Item
+---@return string
 local function _item_label(item)
 	if not item.label_chunks then return "" end
 	local parts = {}
 	for _, chunk in ipairs(item.label_chunks) do
 		table.insert(parts, chunk[1] or "")
 	end
-	return table.concat(parts):gsub("\n", " ")
+	return _one_line(table.concat(parts))
 end
 
 ---@class ezpick.util.Picker
@@ -328,10 +354,14 @@ end
 ---@field async_preview_cancel fun()?
 ---@field _preview_external_buf integer?
 ---@field preview_timer table?
----@field resize_augroup number?
----@field current_query string?
+---@field query_text string
+---@field original_cword string
 ---@field history string[]
 ---@field history_idx number
+---@field history_saved_query string?
+---@field _set_init_cursor boolean
+---@field _last_clean_query string?
+---@field _last_flags table?
 ---@field _suppress_autocomplete boolean?
 ---@field _query_hint string? -- message of the query hint currently shown in the prompt
 ---@field _list_sep_line string
@@ -351,12 +381,11 @@ function Picker:init(opts, callback)
 	vim.validate("opts", opts, "table")
 	vim.validate("callback", callback, "function")
 
-	self.opts                  = opts and vim.deepcopy(opts) or {}
+	self.opts                  = vim.deepcopy(opts)
 	self.opts.flags            = self.opts.flags or {}
 	self.callback              = callback
 
-	self.preview_enabled       = opts.enable_preview
-	self.preview_default       = "visible" ---@type "visible"|"hidden"
+	self.preview_enabled       = opts.enable_preview == true
 
 	self.list_items            = {} ---@type ezpick.picker.ListItem[]
 
@@ -370,7 +399,7 @@ function Picker:init(opts, callback)
 	self.async_fetch_context   = 0
 	self.async_fetch_cancel    = nil
 
-	self._set_init_cursor       = true
+	self._set_init_cursor      = true
 
 	self.async_preview_context = 0
 	self.async_preview_cancel  = nil
@@ -388,8 +417,11 @@ function Picker:init(opts, callback)
 		self.history_idx = #self.history + 1
 	end
 
-	local cword_ok, cword = pcall(vim.fn.expand, "<cword>")
-	self.original_cword = tostring(cword_ok and (type(cword) == "table" and cword[1] or cword) or "")
+	-- Load-bearing pcall: `expand` throws E348 when there is no word under the
+	-- cursor, which is the ordinary state of a blank line. It only returns a
+	-- list when asked to, which this is not, hence the cast.
+	local ok, cword            = pcall(vim.fn.expand, "<cword>")
+	self.original_cword        = (ok and cword or "") --[[@as string]]
 
 	_active_picker = self
 
@@ -405,6 +437,9 @@ function Picker:init(opts, callback)
 		self:run_fetch()
 	end
 	vim.schedule(function()
+		-- Anything closing the picker within the same tick leaves the focus on a
+		-- normal buffer, and starting insert there is the user's file, not a prompt.
+		if self.closed then return end
 		vim.cmd("startinsert!")
 	end)
 end
@@ -412,8 +447,11 @@ end
 function Picker:apply_prompt()
 	if self.closed then return end
 	local nlines = vim.api.nvim_buf_line_count(self.pbuf)
+	-- A multi-line paste is flattened onto the one line the prompt has. The
+	-- lines are joined with a space rather than butted together, so pasting two
+	-- words does not silently make a third one out of them.
 	local raw = nlines > 1
-		and table.concat(vim.api.nvim_buf_get_lines(self.pbuf, 0, -1, false), "")
+		and table.concat(vim.api.nvim_buf_get_lines(self.pbuf, 0, -1, false), " ")
 		or (vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "")
 	local text = raw:gsub("[%c]", "")
 
@@ -458,11 +496,7 @@ end
 
 ---@return nil
 function Picker:setup_ui()
-	local preview_action
-	if self.preview_enabled and self.preview_default == "visible" then
-		preview_action = "show_preview"
-	end
-	self:relayout(preview_action)
+	self:relayout()
 
 	assert(self.pbuf ~= nil)
 	-- Expose flag completion on the prompt buffer so <C-x><C-o>, <C-x><C-u>, or any
@@ -499,7 +533,7 @@ function Picker:setup_ui()
 			vim.api.nvim_replace_termcodes(self.original_cword, true, false, true),
 			"i", false
 		)
-	end, { buffer = self.pbuf, desc = "Page original <cword>" })
+	end, { buffer = self.pbuf, desc = "Paste original <cword>" })
 end
 
 ---Indent wrapped list lines so continuations are visually distinct from new
@@ -515,13 +549,9 @@ function Picker:_apply_wrap_indent()
 	end
 end
 
-function Picker:toggle_preview()
-	if not self.preview_enabled then return end
-	self:relayout(self.vwin ~= nil and "hide_preview" or "show_preview")
-end
-
----@param action "show_preview"|"hide_preview"|nil
-function Picker:relayout(action)
+---Build the floats for the current editor size, creating whatever is not up yet
+---and moving whatever is.
+function Picker:relayout()
 	if self.closed then return end
 	local opts = self.opts
 	local title = opts.prompt and (" " .. opts.prompt .. " ") or ""
@@ -532,10 +562,8 @@ function Picker:relayout(action)
 		)
 	end
 
-	local has_preview = (self.vwin ~= nil and action ~= "hide_preview") or action == "show_preview"
-
 	self.layout = layouts.build(self.opts.layout, {
-		has_preview = has_preview,
+		has_preview = self.preview_enabled,
 		height_ratio = self.opts.height_ratio,
 		width_ratio = self.opts.width_ratio,
 	})
@@ -644,7 +672,18 @@ function Picker:relayout(action)
 		}))
 	end
 
-	if has_preview then
+	-- The separators are drawn to the list width, so a list that survives a
+	-- relayout has to be laid out again against the new one -- otherwise every
+	-- separator keeps the length of the window the picker used to be. The
+	-- labels themselves were cropped by their source and stay as they are until
+	-- the next fetch re-crops them.
+	if #self.list_items > 0 then
+		local row = self:get_cursor()
+		self:set_items(self.list_items)
+		if row then self:move_cursor(row, true, true) end
+	end
+
+	if self.preview_enabled then
 		if not self.vwin then
 			if not self.vbuf then
 				self.vbuf = _create_buffer(false, function()
@@ -684,16 +723,6 @@ function Picker:relayout(action)
 			}))
 		end
 		self:update_preview()
-	else
-		self:release_external_preview_buf()
-		if self.vwin then
-			vim.api.nvim_win_close(self.vwin, true)
-			self.vwin = nil
-		end
-		if self.vbuf then
-			vim.api.nvim_buf_delete(self.vbuf, { force = true })
-			self.vbuf = nil
-		end
 	end
 end
 
@@ -763,7 +792,9 @@ function Picker:render_cursor()
 	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CURSOR, 0, -1)
 	local total = #self.list_items
 	if total == 0 then
-		vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CURSOR, 0, -1)
+		if self.pbuf then
+			vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CURSOR, 0, -1)
+		end
 		return
 	end
 	local cur = self:get_cursor() or 1
@@ -781,16 +812,20 @@ function Picker:get_cursor()
 end
 
 ---Neovim won't scroll to reveal virt_lines hanging below the cursor line, so an
----entry sitting on the bottom row of the viewport has its virtual lines clipped.
----When that's the case, scroll the view up by the entry's virtual line count.
+---entry sitting on the bottom row of the viewport has its virtual line clipped.
+---When that's the case, scroll the view up a row to bring it back.
+---
+---Only the *last* entry needs this. Scrolling to the cursor works for every
+---other row, because there is a real line below it to scroll onto; past the end
+---of the buffer there is nothing to scroll to and Neovim stops, leaving the
+---hanging lines off screen. Callers gate on that -- see `move_cursor`.
 ---@param row integer
 function Picker:_reveal_virt_lines(row)
 	if not self.lwin or not vim.api.nvim_win_is_valid(self.lwin) then return end
 	local item = self.list_items[row]
-	if not item then return end
-
-	local vcount = (item.virt_line and 1 or 0) + (self._show_list_sep and 1 or 0)
-	if vcount == 0 then return end
+	-- Only the virtual line moves the view: a separator clipped at the very
+	-- bottom of the list costs nothing to leave there.
+	if not item or not item.virt_line then return end
 
 	vim.api.nvim_win_call(self.lwin, function()
 		-- Screen height of the entry's own text (wrapped rows, excluding virt_lines).
@@ -802,7 +837,7 @@ function Picker:_reveal_virt_lines(row)
 		local bottom_row = vim.fn.winline() + line_height - 1
 		if bottom_row < vim.api.nvim_win_get_height(self.lwin) then return end
 		local view = vim.fn.winsaveview()
-		view.topline = view.topline + (item.virt_line and 1 or 0)
+		view.topline = view.topline + 1
 		vim.fn.winrestview(view)
 	end)
 end
@@ -811,12 +846,9 @@ end
 ---@param force boolean?
 ---@param clamp boolean?
 function Picker:move_cursor(row, force, clamp)
-	if not force then
-		if row == self:get_cursor() then return end
-	end
-
 	local total = #self.list_items
 	if total == 0 then return end
+	if not self.lwin or not vim.api.nvim_win_is_valid(self.lwin) then return end
 
 	if clamp then
 		row = _clamp(row, 1, total)
@@ -824,6 +856,11 @@ function Picker:move_cursor(row, force, clamp)
 		if row > total then row = 1 end
 		if row < 1 then row = total end
 	end
+
+	-- Compared after clamping, not before: <C-d> on the last row resolves to
+	-- the row the cursor already sits on, and re-selecting it would cancel the
+	-- preview and load the same item again.
+	if not force and row == self:get_cursor() then return end
 
 	vim.api.nvim_win_set_cursor(self.lwin, { row, 0 })
 	vim.schedule(function()
@@ -858,8 +895,11 @@ function Picker:update_preview()
 	local item = cursor and self.list_items[cursor] or nil
 	if not item then return end
 
-	local preview_width = math.max(0, self.layout.preview_width - 2) -- -2 for borders
-	local preview_height = math.max(0, self.layout.preview_height - 2) -- -2 for borders
+	-- The layout's width and height are what `nvim_open_win` was handed, and it
+	-- draws the border outside them (see `layouts._BORDER_SPAN`), so these are
+	-- already the content area a previewer gets to fill.
+	local preview_width = self.layout.preview_width
+	local preview_height = self.layout.preview_height
 
 	local preview_fn = self.opts.previewer or pickertools.file_preview
 
@@ -992,18 +1032,21 @@ function Picker:request_clear_preview(immediate)
 end
 
 function Picker:cancel_clear_preview_req()
-	self.preview_timer = common.stop_and_close_timer(self.preview_timer)
+	self.preview_timer = timer.stop_and_close_timer(self.preview_timer)
 end
 
 function Picker:clear_list()
 	self.list_items = {}
 	self._show_list_sep = false
 	self:_apply_wrap_indent()
+	if not self.lbuf then return end
 
 	vim.bo[self.lbuf].modifiable = true
 	vim.api.nvim_buf_set_lines(self.lbuf, 0, -1, false, {})
 	vim.bo[self.lbuf].modifiable = false
-	vim.wo[self.lwin].cursorline = false
+	if self.lwin and vim.api.nvim_win_is_valid(self.lwin) then
+		vim.wo[self.lwin].cursorline = false
+	end
 
 	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
 	self:request_clear_preview()
@@ -1011,16 +1054,13 @@ function Picker:clear_list()
 	self:render_position()
 end
 
----@param items ezpick.Picker.Item[]?
+---@param items (ezpick.Picker.Item|ezpick.picker.ListItem)[]?
 function Picker:set_items(items)
 	items = items or {}
+	if not self.lbuf then return end
 
 	local prefix = "  "
-
-	self.list_items = {}
-
-	local lines = {}
-	local extmarks = {}
+	local count  = #items
 
 	-- A separator is what keeps a virtual line attached to its own entry, so it
 	-- turns on for the whole list as soon as any item carries one.
@@ -1033,87 +1073,88 @@ function Picker:set_items(items)
 	end
 	self:_apply_wrap_indent()
 
-	for row_idx, item in ipairs(items) do
-		---@type ezpick.picker.ListItem
-		local list_item = {
+	local list_items = tbl_new(count, 0) ---@type ezpick.picker.ListItem[]
+	local lines      = tbl_new(count, 0) ---@type string[]
+
+	for row_idx = 1, count do
+		local item   = items[row_idx]
+		local chunks = item.label_chunks
+
+		list_items[row_idx] = {
 			data = item.data,
-			label_chunks = item.label_chunks,
+			label_chunks = chunks,
 			virt_line = item.virt_line,
 		}
 
-		local label = _item_label(item)
+		if not chunks or #chunks == 0 then
+			lines[row_idx] = prefix
+		elseif #chunks == 1 then
+			lines[row_idx] = prefix .. _one_line(chunks[1][1] or "")
+		else
+			local parts = tbl_new(#chunks + 1, 0)
+			parts[1] = prefix
+			for i = 1, #chunks do
+				local text = chunks[i][1]
+				if text and #text > 0 then parts[#parts + 1] = _one_line(text) end
+			end
+			lines[row_idx] = table.concat(parts)
+		end
+	end
 
-		table.insert(self.list_items, list_item)
+	self.list_items = list_items
 
-		local row = row_idx - 1
-		table.insert(lines, prefix .. label)
+	vim.bo[self.lbuf].modifiable = true
+	vim.api.nvim_buf_set_lines(self.lbuf, 0, -1, false, lines)
+	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
 
-		if item.label_chunks then
+	-- Highlighting is a second pass because an extmark needs its line to exist
+	-- first. It reads the chunks again rather than carrying a description of
+	-- each mark over from the pass above: at ten thousand rows a keystroke, that
+	-- description is two throwaway tables per highlighted chunk.
+	for row_idx = 1, count do
+		local item   = items[row_idx]
+		local row    = row_idx - 1
+		local chunks = item.label_chunks
+
+		if chunks then
 			local col = #prefix
-
-			for _, chunk in ipairs(item.label_chunks) do
-				local text, hl = chunk[1], chunk[2]
-
+			for i = 1, #chunks do
+				local text, hl = chunks[i][1], chunks[i][2]
 				if text and #text > 0 then
 					if hl then
-						table.insert(extmarks, {
-							ns = _NS_CONTENT,
-							row = row,
-							col = col,
-							opts = {
-								end_col = col + #text,
-								hl_group = hl,
-							},
+						vim.api.nvim_buf_set_extmark(self.lbuf, _NS_CONTENT, row, col, {
+							end_col  = col + #text,
+							hl_group = hl,
 						})
 					end
-
 					col = col + #text
 				end
 			end
 		end
 
-		local vlines = {}
-
+		local vlines
 		if item.virt_line and #item.virt_line > 0 then
 			local vl = { { prefix } }
 			vim.list_extend(vl, item.virt_line)
-			table.insert(vlines, vl)
+			vlines = { vl }
 		end
-
 		if self._show_list_sep then
-			table.insert(vlines, { { self._list_sep_line, "NonText" } })
+			vlines = vlines or {}
+			vlines[#vlines + 1] = { { self._list_sep_line, "NonText" } }
 		end
 
-		if #vlines > 0 then
-			table.insert(extmarks, {
-				ns = _NS_CONTENT,
-				row = row,
-				col = 0,
-				opts = {
-					virt_lines = vlines,
-					hl_mode = "blend",
-				},
+		if vlines then
+			vim.api.nvim_buf_set_extmark(self.lbuf, _NS_CONTENT, row, 0, {
+				virt_lines = vlines,
+				hl_mode    = "blend",
 			})
 		end
 	end
 
-	vim.bo[self.lbuf].modifiable = true
-
-	vim.api.nvim_buf_set_lines(self.lbuf, 0, -1, false, lines)
-
-	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
-
-	for _, mark in ipairs(extmarks) do
-		vim.api.nvim_buf_set_extmark(
-			self.lbuf,
-			mark.ns,
-			mark.row,
-			mark.col,
-			mark.opts
-		)
-	end
 	vim.bo[self.lbuf].modifiable = false
-	vim.wo[self.lwin].cursorline = #self.list_items > 0
+	if self.lwin and vim.api.nvim_win_is_valid(self.lwin) then
+		vim.wo[self.lwin].cursorline = count > 0
+	end
 end
 
 -- Resolve which row the cursor starts on. The function form is handed the items
@@ -1128,13 +1169,14 @@ local function _resolve_initial_cursor(items, initial_cursor)
 end
 
 function Picker:run_fetch()
-	local query_text   = self.query_text
-	self.current_query = query_text
+	local query_text = self.query_text
 
 	---@type ezpick.Picker.FetcherOpts
 	local fetch_opts = {
+		-- The window width is the content area; the two columns come off for
+		-- the prefix every row is written behind, not for the border.
 		list_width  = math.max(1, self.layout.list_width - 2),
-		list_height = math.max(1, self.layout.list_height - 2),
+		list_height = math.max(1, self.layout.list_height),
 	}
 
 	local clean_query, flags
@@ -1302,30 +1344,21 @@ function Picker:close(selected_data)
 
 	self:stop_spinner()
 
-	self.preview_timer = common.stop_and_close_timer(self.preview_timer)
+	self.preview_timer = timer.stop_and_close_timer(self.preview_timer)
 
 	if self.async_fetch_cancel then self.async_fetch_cancel() end
 	if self.async_preview_cancel then self.async_preview_cancel() end
 
-	if self.opts.on_close then
-		self.opts.on_close(self.query_text, cursor)
-	end
-
 	self:release_external_preview_buf()
-
-	if self.opts.history_provider then
-		local entry = self.query_text
-		if entry ~= "" and entry ~= self.history[#self.history] then
-			table.insert(self.history, entry)
-			if self.opts.history_provider.store then
-				self.opts.history_provider.store(self.history)
-			end
-		end
-	end
 
 	-- Leaving insert mode steps the cursor one column left, and `:stopinsert`
 	-- only takes effect once this returns -- so the floats have to outlive it,
 	-- or that step lands in the window the focus falls back to.
+	--
+	-- Both go in ahead of the spec's own callbacks below. `closed` is already
+	-- true and the prompt's autocmds are already gone, so an error raised out
+	-- of one of those would otherwise leave three floats on screen that no
+	-- keymap can shut: every one of them routes back through here.
 	vim.cmd("stopinsert!")
 	vim.schedule(function()
 		for _, w in pairs({ self.pwin, self.lwin, self.vwin }) do
@@ -1342,6 +1375,20 @@ function Picker:close(selected_data)
 
 		self.callback(selected_data)
 	end)
+
+	if self.opts.on_close then
+		self.opts.on_close(self.query_text, cursor)
+	end
+
+	if self.opts.history_provider then
+		local entry = self.query_text
+		if entry ~= "" and entry ~= self.history[#self.history] then
+			table.insert(self.history, entry)
+			if self.opts.history_provider.store then
+				self.opts.history_provider.store(self.history)
+			end
+		end
+	end
 end
 
 function Picker:setup_input()
