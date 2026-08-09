@@ -153,6 +153,16 @@ describe("picker query hints", function()
         assert.are.equal("My Doc", flags.dir)
     end)
 
+    it("keeps complaining about a value slot the rest of the line has closed", function()
+        -- Deleting the value from "--dir a --dir b" leaves the cursor in the gap,
+        -- where the usual hold rule would read it as a value being typed. It is
+        -- not: the flag after it stands where the value would go, so no amount of
+        -- typing at the end fixes it, and going quiet would reward the deletion.
+        local hint, marked = select(3, type_query("--dir --dir b", 6))
+        assert.is_truthy(hint:find("needs a value", 1, true))
+        assert.are.equal(1, marked)
+    end)
+
     it("says nothing about a flag the cursor is still writing", function()
         -- Every one of these is a state on the way to a correct flag; nagging
         -- through them turns the prompt into a stream of complaints.

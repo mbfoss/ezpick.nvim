@@ -26,10 +26,13 @@ local M = {}
 ---A problem worth pointing out that is never worth refusing to search over:
 ---every hint is advisory, and `parse` always returns a usable query beside it.
 ---@class ezpick.queryflags.Hint
----@field start  integer -- 0-indexed byte start of the offending span
----@field finish integer -- 0-indexed byte end of the offending span (exclusive)
----@field msg    string  -- terse; it shares the prompt line with the query
----@field kind   ezpick.queryflags.HintKind
+---@field start   integer  -- 0-indexed byte start of the offending span
+---@field finish  integer  -- 0-indexed byte end of the offending span (exclusive)
+---@field msg     string   -- terse; it shares the prompt line with the query
+---@field kind    ezpick.queryflags.HintKind
+---@field settled boolean? -- typing on cannot resolve this one, so a consumer that
+---                        -- holds hints back while they are being written should
+---                        -- show it anyway
 
 ---@class ezpick.queryflags.ParseResult
 ---@field query       string  -- the query, verbatim: every byte from where the flags stop
@@ -253,12 +256,13 @@ local function _scan(str, defs, schema)
     ---@type ezpick.queryflags.FlagDef?
     local pending = nil -- a value flag left waiting for its value at end of input
 
-    ---@param kind ezpick.queryflags.HintKind
-    ---@param s    integer  -- 1-indexed inclusive
-    ---@param e    integer  -- 1-indexed inclusive
-    ---@param msg  string
-    local function hint(kind, s, e, msg)
-        hints[#hints + 1] = { kind = kind, start = s - 1, finish = e, msg = msg }
+    ---@param kind    ezpick.queryflags.HintKind
+    ---@param s       integer  -- 1-indexed inclusive
+    ---@param e       integer  -- 1-indexed inclusive
+    ---@param msg     string
+    ---@param settled boolean? -- see `Hint.settled`
+    local function hint(kind, s, e, msg, settled)
+        hints[#hints + 1] = { kind = kind, start = s - 1, finish = e, msg = msg, settled = settled or nil }
     end
 
     ---@param def ezpick.queryflags.FlagDef
@@ -340,7 +344,12 @@ local function _scan(str, defs, schema)
                 if i <= len then pending = def end
                 hint("missing-value", tok_start, name_end, needs_value(def))
             elseif next_sep or (next_name and defs[_key(next_name)]) then
-                hint("missing-value", tok_start, name_end, needs_value(def))
+                -- Something already stands where the value would go, so the slot
+                -- is closed: unlike the open one above, typing on at the end of
+                -- the line will never fill it. Settled, and said at once --- it
+                -- is exactly the state a value deleted from the middle leaves
+                -- behind, and going quiet there rewards making the line worse.
+                hint("missing-value", tok_start, name_end, needs_value(def), true)
             else
                 local value
                 value, i = _read_value(str, j)

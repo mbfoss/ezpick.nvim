@@ -100,7 +100,8 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---passes through these states on the way to being written correctly, so they are
 ---held back until the cursor has moved off what they point at. The rest --- a
 ---flag given twice, a value on a switch --- are already settled mistakes and say
----so immediately.
+---so immediately, as does any hint `parse` itself marks `settled`: a kind that
+---is usually mid-typing can still turn up in a state typing cannot get out of.
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
 	["missing-value"]  = true,
@@ -746,7 +747,7 @@ function Picker:render_prompt_highlight(query)
 	local cursor = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
 	local shown  = {}
 	for _, hint in ipairs(queryflags.parse(self.opts.flags, query).hints) do
-		if not (_HELD_WHILE_TYPING[hint.kind] and _at_cursor(query, hint, cursor)) then
+		if hint.settled or not (_HELD_WHILE_TYPING[hint.kind] and _at_cursor(query, hint, cursor)) then
 			table.insert(shown, hint)
 		end
 	end
