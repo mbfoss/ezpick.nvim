@@ -93,7 +93,7 @@ describe("picker query hints", function()
     ---it would sit having just been typed.
     ---@param text   string
     ---@param cursor integer?  -- 0-indexed byte column
-    ---@return string? query, table? flags, string? hint
+    ---@return string? query, table? flags, string? hint, integer marked  -- `marked`: spans underlined as a problem
     local function type_query(text, cursor)
         local seen_query, seen_flags
         picker.open({
@@ -135,11 +135,13 @@ describe("picker query hints", function()
         -- The position counter shares this corner, so match on the hint's own
         -- highlight rather than on being virtual text.
         local hint
+        local marked = 0
         for _, m in ipairs(vim.api.nvim_buf_get_extmarks(pbuf, -1, 0, -1, { details = true })) do
             local vt = m[4] and m[4].virt_text
             if vt and vt[1][2] == "DiagnosticVirtualTextWarn" then hint = vim.trim(vt[1][1]) end
+            if m[4] and m[4].hl_group == "DiagnosticUnderlineWarn" then marked = marked + 1 end
         end
-        return seen_query, seen_flags, hint
+        return seen_query, seen_flags, hint, marked
     end
 
     after_each(function() vim.cmd("silent! close!") end)
@@ -171,11 +173,21 @@ describe("picker query hints", function()
         assert.is_truthy(hint:find("--hidden", 1, true))
     end)
 
-    it("says why a flag after the query did nothing", function()
-        local query, flags, hint = type_query("hello --hidden")
+    it("leaves a flag written after the query entirely alone", function()
+        -- It is a word in the search text like any other: unset as a flag, and
+        -- neither underlined nor remarked upon.
+        local query, flags, hint, marked = type_query("hello --hidden")
         assert.are.equal("hello --hidden", query)
         assert.is_nil(flags.hidden)
-        assert.is_truthy(hint:find("must come first", 1, true))
+        assert.is_nil(hint)
+        assert.are.equal(0, marked)
+    end)
+
+    it("marks a flag whose value another occurrence threw away", function()
+        local _, flags, hint, marked = type_query("--dir a --dir b x")
+        assert.are.equal("b", flags.dir)
+        assert.is_truthy(hint:find("2 times", 1, true))
+        assert.are.equal(2, marked)
     end)
 
     it("passes the query through byte for byte", function()

@@ -17,7 +17,7 @@ local M = {}
 
 ---@alias ezpick.queryflags.HintKind
 ---| "unknown-flag"     -- a dashed word that names no flag
----| "misplaced-flag"   -- a real flag name written in the query, where it is text
+---| "duplicate-flag"   -- a single-valued flag given more than once
 ---| "missing-value"    -- a value flag with nothing to take
 ---| "bad-value"        -- a value outside a strict flag's `values`
 ---| "unclosed-quote"   -- a value quote that never closes
@@ -69,7 +69,7 @@ local _PATH_COMPLETE = {
 -- was typed must receive exactly what was typed.
 --
 --   '--hidden --dir src foo  bar'  → flags hidden, dir=src; query 'foo  bar'
---   'foo --hidden'                 → query 'foo --hidden' (+ a misplaced hint)
+--   'foo --hidden'                 → query 'foo --hidden', flag unset
 --
 -- Flag names are matched loosely: case, '-' and '_' are ignored, so --no-ignore,
 -- --noignore and --NoIgnore are the same flag, as is any name listed in `alias`.
@@ -333,8 +333,11 @@ local function _scan(str, defs, schema)
             local next_sep  = str:sub(j, j + 1) == _PREFIX and (j + 2 > len or str:sub(j + 2, j + 2):match("%s"))
             if j > len then
                 -- Nothing typed yet: the slot is open rather than wrong, so this
-                -- doubles as the prompt for what to put there.
-                pending = def
+                -- doubles as the prompt for what to put there. The slot only
+                -- exists once something separates it from the name, though:
+                -- "--mode" is a name still being typed -- perhaps into "--modes"
+                -- -- and offering it values would complete the wrong thing.
+                if i <= len then pending = def end
                 hint("missing-value", tok_start, name_end, needs_value(def))
             elseif next_sep or (next_name and defs[_key(next_name)]) then
                 hint("missing-value", tok_start, name_end, needs_value(def))
@@ -350,40 +353,6 @@ local function _scan(str, defs, schema)
     return pieces, len + 1, hints, pending
 end
 
----Flag names written in the query, where they are ordinary text. Worth saying
----only when the query opens the line: someone who wrote no flags at all has
----probably put one in the wrong place, rather than meant it as text.
----@param defs  table<string, ezpick.queryflags.FlagDef>
----@param raw   string
----@param from  integer  -- 1-indexed start of the query
----@param hints ezpick.queryflags.Hint[]
-local function _collect_misplaced(defs, raw, from, hints)
-    local i, len = from, #raw
-    while i <= len do
-        while i <= len and raw:sub(i, i):match("%s") do i = i + 1 end
-        if i > len then break end
-
-        local tok_start = i
-        while i <= len and not raw:sub(i, i):match("%s") do i = i + 1 end
-
-        local name, name_end = _dashed_name(raw, tok_start)
-        -- Only an exact flag name counts: "--dir" and "--dir=src" are mistakes,
-        -- but a word merely starting with them is just a word.
-        if name and defs[_key(name)] then
-            assert(name_end)
-            local after = raw:sub(name_end + 1, name_end + 1)
-            if after == "" or after == "=" or after:match("%s") then
-                hints[#hints + 1] = {
-                    kind   = "misplaced-flag",
-                    start  = tok_start - 1,
-                    finish = i - 1,
-                    msg    = ("%s%s must come first"):format(_PREFIX, defs[_key(name)].name),
-                }
-            end
-        end
-    end
-end
-
 ---@param schema ezpick.queryflags.FlagDef[]
 ---@param raw    string
 ---@return ezpick.queryflags.ParseResult
@@ -391,14 +360,17 @@ function M.parse(schema, raw)
     local defs                         = _build_map(schema)
     local flags                        = {}
     local pieces, query_start, hints   = _scan(raw, defs, schema)
-    local separated                    = false
-    local flagged                      = false
+    ---Name spans of every occurrence of each single-valued flag, left to right.
+    ---@type table<string, {start:integer, finish:integer}[]>
+    local occurrences                  = {}
+    ---@type ezpick.queryflags.Piece?
+    local last_flag                    = nil
 
+    -- The separator carries nothing of its own: its whole effect is on where
+    -- `_scan` stopped, and the query starts past it either way.
     for _, piece in ipairs(pieces) do
-        if piece.kind == "separator" then
-            separated = true
-        elseif piece.kind == "flag" then
-            flagged = true
+        if piece.kind == "flag" then
+            last_flag = piece
             -- A value flag's value is a piece of its own; only switches are
             -- carried by the name itself.
             if defs[_key(piece.name)].type == "boolean" then flags[piece.name] = true end
@@ -434,17 +406,38 @@ function M.parse(schema, raw)
                 flags[piece.name] = flags[piece.name] or {}
                 table.insert(flags[piece.name], value)
             else
+                -- Only the last value of a repeated flag survives, and the ones
+                -- it displaces leave no mark on the line: every occurrence still
+                -- reads as an accepted flag. Note where they are, to say so once
+                -- the winner is known.
+                if last_flag then
+                    local spans = occurrences[piece.name] or {}
+                    spans[#spans + 1] = {
+                        start  = last_flag.start - 1,
+                        finish = last_flag.eq and (last_flag.eq - 1) or last_flag.finish,
+                    }
+                    occurrences[piece.name] = spans
+                end
                 flags[piece.name] = value
             end
         end
     end
 
-    -- An explicit separator says the flag-looking words ahead are wanted as
-    -- text, so there is nothing left to warn about. Neither is there once a flag
-    -- has been written and taken: the syntax has plainly landed, and a later
-    -- "--dir" is a second one the user typed into their own search text.
-    if not separated and not flagged then
-        _collect_misplaced(defs, raw, query_start, hints)
+    -- Every occurrence is marked, so the repetition is visible as a whole, and
+    -- all of them carry the message: only the leftmost is ever given words, and
+    -- which one that is depends on what else the line has to say.
+    for name, spans in pairs(occurrences) do
+        if #spans > 1 then
+            local msg = ("%s%s set %d times, using '%s'"):format(_PREFIX, name, #spans, flags[name])
+            for _, span in ipairs(spans) do
+                hints[#hints + 1] = {
+                    kind   = "duplicate-flag",
+                    start  = span.start,
+                    finish = span.finish,
+                    msg    = msg,
+                }
+            end
+        end
     end
 
     table.sort(hints, function(a, b) return a.start < b.start end)

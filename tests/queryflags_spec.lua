@@ -19,6 +19,17 @@ local function hint_of(result, kind)
     return nil
 end
 
+---@param result ezpick.queryflags.ParseResult
+---@param kind   string
+---@return ezpick.queryflags.Hint[]  -- in the order parse sorted them, left to right
+local function hints_of(result, kind)
+    local found = {}
+    for _, h in ipairs(result.hints) do
+        if h.kind == kind then found[#found + 1] = h end
+    end
+    return found
+end
+
 describe("queryflags query", function()
     it("treats plain words as the query", function()
         local r = qf.parse(schema, "hello world")
@@ -133,10 +144,6 @@ describe("queryflags literal separator", function()
         local r = qf.parse(schema, "--fixed --")
         assert.is_true(r.flags.fixed)
         assert.are.equal("", r.query)
-    end)
-
-    it("silences the misplaced-flag hint", function()
-        assert.is_nil(hint_of(qf.parse(schema, "-- --fixed here"), "misplaced-flag"))
     end)
 
     it("leaves a colon-looking token in the query", function()
@@ -296,26 +303,65 @@ describe("queryflags hints", function()
         assert.is_not_nil(hint_of(qf.parse(schema, "--fi x"), "unknown-flag"))
     end)
 
-    it("points out a flag written after the query", function()
-        local h = hint_of(qf.parse(schema, "hello --fixed"), "misplaced-flag")
-        assert.is_not_nil(h)
-        assert.are.equal(6, h.start)
-        assert.are.equal(13, h.finish)
-    end)
+    it("says nothing about a flag name inside the query, which is ordinary text", function()
+        -- The query is searched for exactly as written, so a word in it that
+        -- happens to spell a flag is not a mistake to report -- it is what was
+        -- asked for.
+        assert.are.same({}, qf.parse(schema, "hello --fixed").hints)
+        assert.are.same({}, qf.parse(schema, "hello --path=src").hints)
+        assert.are.same({}, qf.parse(schema, "hello --fixedly").hints)
 
-    it("points out a value flag written after the query", function()
-        assert.is_not_nil(hint_of(qf.parse(schema, "hello --path=src"), "misplaced-flag"))
-    end)
-
-    it("stays quiet about a flag name in the query once a flag was taken", function()
+        -- ... including after flags that did parse, whose values stand
         local r = qf.parse(schema, "--path . a --path")
-        assert.is_nil(hint_of(r, "misplaced-flag"))
+        assert.are.same({}, r.hints)
         assert.are.equal("a --path", r.query)
         assert.are.equal(".", r.flags.path)
     end)
 
-    it("ignores a word that merely starts with a flag name", function()
-        assert.is_nil(hint_of(qf.parse(schema, "hello --fixedly"), "misplaced-flag"))
+    it("points out a single-valued flag given twice, and keeps the last value", function()
+        local r = qf.parse(schema, "--path a --path b")
+        assert.are.equal("b", r.flags.path)
+        local hs = hints_of(r, "duplicate-flag")
+        assert.are.equal(2, #hs)
+        assert.is_truthy(hs[1].msg:find("2 times", 1, true))
+        assert.is_truthy(hs[1].msg:find("'b'", 1, true))
+    end)
+
+    it("marks every occurrence of a repeated flag", function()
+        local hs = hints_of(qf.parse(schema, "--path a --path b --path c"), "duplicate-flag")
+        assert.are.equal(3, #hs)
+        -- the winner named is the last one, not the second
+        assert.is_truthy(hs[1].msg:find("'c'", 1, true))
+        assert.is_truthy(hs[1].msg:find("3 times", 1, true))
+    end)
+
+    it("marks the flag name only, glued or spaced alike", function()
+        local hs = hints_of(qf.parse(schema, "--path=a --path b"), "duplicate-flag")
+        assert.are.equal(2, #hs)
+        assert.are.same({ start = 0, finish = 6 }, { start = hs[1].start, finish = hs[1].finish })
+        assert.are.same({ start = 9, finish = 15 }, { start = hs[2].start, finish = hs[2].finish })
+    end)
+
+    it("counts an explicitly empty value as a value given", function()
+        local r = qf.parse(schema, "--repl= --repl x")
+        assert.are.equal("x", r.flags.repl)
+        assert.are.equal(2, #hints_of(r, "duplicate-flag"))
+    end)
+
+    it("says nothing about a flag given once", function()
+        assert.is_nil(hint_of(qf.parse(schema, "--path a hello"), "duplicate-flag"))
+    end)
+
+    it("says nothing about a repeated multi flag", function()
+        local r = qf.parse(schema, "--kind x --kind y")
+        assert.are.same({ "x", "y" }, r.flags.kind)
+        assert.is_nil(hint_of(r, "duplicate-flag"))
+    end)
+
+    it("says nothing about a repeated switch, which discards nothing", function()
+        local r = qf.parse(schema, "--fixed --fixed hello")
+        assert.is_true(r.flags.fixed)
+        assert.is_nil(hint_of(r, "duplicate-flag"))
     end)
 
     it("rejects a value outside a strict flag's values", function()
@@ -336,8 +382,10 @@ describe("queryflags hints", function()
     end)
 
     it("orders hints by position", function()
-        local r = qf.parse(schema, "--case bogus --fixd hello")
-        assert.is_true(#r.hints >= 2)
+        -- Duplicates are appended once the winning value is known, so they land
+        -- in the list after hints that sit to their left.
+        local r = qf.parse(schema, "--path a --path b --case bogus zzz")
+        assert.is_true(#r.hints >= 3)
         for i = 2, #r.hints do
             assert.is_true(r.hints[i - 1].start <= r.hints[i].start)
         end
@@ -462,6 +510,15 @@ describe("queryflags completion", function()
 
     it("offers values in the empty slot after a value flag", function()
         assert.is_true(vim.tbl_contains(words(schema, "--path ", true), "foo"))
+    end)
+
+    it("offers names, not values, while the flag name is still under the cursor", function()
+        -- "--path" is a complete name, but nothing separates it from its value
+        -- slot yet, so the cursor is on the name: completing it must not jump
+        -- ahead to what the flag will eventually take.
+        local w = words(schema, "--path", true)
+        assert.is_true(vim.tbl_contains(w, "--path"))
+        assert.is_false(vim.tbl_contains(w, "foo"))
     end)
 
     it("offers values after an = ", function()

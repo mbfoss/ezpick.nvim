@@ -99,8 +99,8 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---Hints that describe an incomplete thing rather than a wrong one. Every flag
 ---passes through these states on the way to being written correctly, so they are
 ---held back until the cursor has moved off what they point at. The rest --- a
----flag in the wrong place, a value on a switch --- are already settled mistakes
----and say so immediately.
+---flag given twice, a value on a switch --- are already settled mistakes and say
+---so immediately.
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
 	["missing-value"]  = true,
