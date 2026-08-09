@@ -350,9 +350,9 @@ local function _scan(str, defs, schema)
     return pieces, len + 1, hints, pending
 end
 
----Flag names written in the query, where they are ordinary text. Almost always
----a flag typed in the habitual place -- the end -- so say so rather than let it
----silently become part of the search.
+---Flag names written in the query, where they are ordinary text. Worth saying
+---only when the query opens the line: someone who wrote no flags at all has
+---probably put one in the wrong place, rather than meant it as text.
 ---@param defs  table<string, ezpick.queryflags.FlagDef>
 ---@param raw   string
 ---@param from  integer  -- 1-indexed start of the query
@@ -392,11 +392,13 @@ function M.parse(schema, raw)
     local flags                        = {}
     local pieces, query_start, hints   = _scan(raw, defs, schema)
     local separated                    = false
+    local flagged                      = false
 
     for _, piece in ipairs(pieces) do
         if piece.kind == "separator" then
             separated = true
         elseif piece.kind == "flag" then
+            flagged = true
             -- A value flag's value is a piece of its own; only switches are
             -- carried by the name itself.
             if defs[_key(piece.name)].type == "boolean" then flags[piece.name] = true end
@@ -438,8 +440,10 @@ function M.parse(schema, raw)
     end
 
     -- An explicit separator says the flag-looking words ahead are wanted as
-    -- text, so there is nothing left to warn about.
-    if not separated then
+    -- text, so there is nothing left to warn about. Neither is there once a flag
+    -- has been written and taken: the syntax has plainly landed, and a later
+    -- "--dir" is a second one the user typed into their own search text.
+    if not separated and not flagged then
         _collect_misplaced(defs, raw, query_start, hints)
     end
 

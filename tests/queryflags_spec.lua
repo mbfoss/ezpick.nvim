@@ -307,6 +307,13 @@ describe("queryflags hints", function()
         assert.is_not_nil(hint_of(qf.parse(schema, "hello --path=src"), "misplaced-flag"))
     end)
 
+    it("stays quiet about a flag name in the query once a flag was taken", function()
+        local r = qf.parse(schema, "--path . a --path")
+        assert.is_nil(hint_of(r, "misplaced-flag"))
+        assert.are.equal("a --path", r.query)
+        assert.are.equal(".", r.flags.path)
+    end)
+
     it("ignores a word that merely starts with a flag name", function()
         assert.is_nil(hint_of(qf.parse(schema, "hello --fixedly"), "misplaced-flag"))
     end)
@@ -329,7 +336,7 @@ describe("queryflags hints", function()
     end)
 
     it("orders hints by position", function()
-        local r = qf.parse(schema, "--case bogus hello --fixed")
+        local r = qf.parse(schema, "--case bogus --fixd hello")
         assert.is_true(#r.hints >= 2)
         for i = 2, #r.hints do
             assert.is_true(r.hints[i - 1].start <= r.hints[i].start)
