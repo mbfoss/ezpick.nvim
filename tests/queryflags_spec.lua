@@ -166,11 +166,18 @@ describe("queryflags boolean flags", function()
         assert.are.equal("hello", r.query)
     end)
 
-    it("hints when a value is glued on", function()
-        local r = qf.parse(schema, "--fixed=x y")
-        assert.is_true(r.flags.fixed)
-        assert.are.equal("y", r.query)
-        assert.is_not_nil(hint_of(r, "unexpected-value"))
+    it("refuses a value glued onto a switch, whichever way it reads", function()
+        -- A switch is written by being there, so no value assigned to it can be
+        -- right: "=false" reads as off and "=true" as belt and braces, and
+        -- neither is a form this understands. Rather than act on the reading
+        -- that happens to be spelled out, it leaves the switch alone and says so
+        -- -- guessing "on" at "--fixed=false" would be the opposite of the words.
+        for _, raw in ipairs({ "--fixed=x y", "--fixed=true y", "--fixed=false y", "--fixed= y" }) do
+            local r = qf.parse(schema, raw)
+            assert.is_nil(r.flags.fixed, raw)
+            assert.are.equal("y", r.query, raw)
+            assert.is_not_nil(hint_of(r, "unexpected-value"), raw)
+        end
     end)
 end)
 
@@ -298,8 +305,11 @@ describe("queryflags hints", function()
         assert.are.equal("--fixd hello", qf.parse(schema, "--fixd hello").query)
     end)
 
-    it("stays quiet on a flag name still being typed", function()
-        assert.is_nil(hint_of(qf.parse(schema, "--fi"), "unknown-flag"))
+    it("reports a dashed word naming no flag, finished or not", function()
+        -- Whether "--fi" is a typo or the start of "--fixed" is a question only
+        -- the cursor answers, and `parse` does not have it: it reports what it
+        -- sees and leaves the holding to whoever is watching the typing.
+        assert.is_not_nil(hint_of(qf.parse(schema, "--fi"), "unknown-flag"))
         assert.is_not_nil(hint_of(qf.parse(schema, "--fi x"), "unknown-flag"))
     end)
 
@@ -372,9 +382,40 @@ describe("queryflags hints", function()
         assert.are.equal("bogus", qf.parse(schema, "--case bogus zzz").flags.case)
     end)
 
-    it("stays quiet on a strict value still being typed", function()
-        assert.is_nil(hint_of(qf.parse(schema, "--case sm"), "bad-value"))
+    it("reports a strict value that is only a prefix, finished or not", function()
+        -- Same as an unfinished flag name: a prefix of a valid choice is still
+        -- not one of them, and the cursor decides whether saying so is nagging.
+        assert.is_not_nil(hint_of(qf.parse(schema, "--case sm"), "bad-value"))
         assert.is_not_nil(hint_of(qf.parse(schema, "--case sm x"), "bad-value"))
+    end)
+
+    it("marks the flag when the bad value is an empty one", function()
+        -- "--case=" has no value span to point at, and an underline of nothing
+        -- leaves the message with nowhere to have come from.
+        local h = assert(hint_of(qf.parse(schema, "--case= x"), "bad-value"))
+        assert.are.same({ start = 0, finish = 7 }, { start = h.start, finish = h.finish })
+    end)
+
+    it("names the flag the way the line spells it", function()
+        -- The mark and the words have to describe one thing, so an alias is
+        -- echoed back as written: underlining "--dir" while talking about
+        -- "--path" sends the reader hunting for a flag that is nowhere in sight.
+        local aliased = {
+            { name = "path",  type = "value",   alias = { "dir" } },
+            { name = "case",  type = "value",   alias = { "ci" }, strict = true, values = { "on", "off" } },
+            { name = "fixed", type = "boolean", alias = { "F" } },
+        }
+        ---@param raw  string
+        ---@param kind string
+        ---@return string
+        local function msg(raw, kind) return assert(hint_of(qf.parse(aliased, raw), kind)).msg end
+
+        assert.are.equal("--dir needs a value", msg("--dir --fixed", "missing-value"))
+        assert.are.equal("--ci: on|off", msg("--ci bogus x", "bad-value"))
+        assert.are.equal("--F takes no value", msg("--F=x y", "unexpected-value"))
+        assert.is_truthy(msg("--dir a --dir b", "duplicate-flag"):find("--dir set 2 times", 1, true))
+        -- ... and a typo is pointed at the spelling it was reaching for
+        assert.is_truthy(msg("--di x", "unknown-flag"):find("try --dir", 1, true))
     end)
 
     it("does not police a non-strict flag's values", function()
@@ -393,6 +434,18 @@ describe("queryflags hints", function()
 
     it("reports nothing for a clean query", function()
         assert.are.same({}, qf.parse(schema, "--fixed --path src hello").hints)
+    end)
+end)
+
+describe("queryflags schema", function()
+    it("refuses a strict flag with no values to be strict about", function()
+        -- Nothing could ever fail the check, so the flag would quietly accept
+        -- anything while claiming not to. That is a mistake in the schema rather
+        -- than in what was typed, and it is worth hearing about on the first
+        -- render instead of never.
+        assert.has_error(function()
+            qf.parse({ { name = "case", type = "value", strict = true } }, "--case x")
+        end)
     end)
 end)
 

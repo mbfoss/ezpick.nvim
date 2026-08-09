@@ -90,11 +90,15 @@ end)
 describe("picker query hints", function()
     ---Open a picker whose finder records what it was asked for, type `text` into
     ---its prompt, and report back. `cursor` defaults to the end of `text`, where
-    ---it would sit having just been typed.
-    ---@param text   string
-    ---@param cursor integer?  -- 0-indexed byte column
-    ---@return string? query, table? flags, string? hint, integer marked  -- `marked`: spans underlined as a problem
-    local function type_query(text, cursor)
+    ---it would sit having just been typed. `moved_to` moves it afterwards
+    ---without touching the text, as arrowing away from what was typed does.
+    ---@param text     string
+    ---@param cursor   integer?  -- 0-indexed byte column
+    ---@param moved_to integer|integer[]|nil  -- 0-indexed column(s) to move to, in turn, once typed
+    ---@return string? query, table? flags, string? hint, integer marked, boolean counted
+    ---`marked`: spans underlined as a problem. `counted`: the position counter,
+    ---which shares the hint's corner, is the one showing there.
+    local function type_query(text, cursor, moved_to)
         local seen_query, seen_flags
         picker.open({
             prompt = "Hints",
@@ -132,16 +136,26 @@ describe("picker query hints", function()
         vim.api.nvim_exec_autocmds("TextChanged", { buffer = pbuf })
         vim.wait(50)
 
+        ---@type integer[]
+        local moves = type(moved_to) == "table" and moved_to or { moved_to }
+        for _, col in ipairs(moves) do
+            vim.api.nvim_win_set_cursor(pwin, { 1, col })
+            vim.api.nvim_exec_autocmds("CursorMoved", { buffer = pbuf })
+            vim.wait(50)
+        end
+
         -- The position counter shares this corner, so match on the hint's own
         -- highlight rather than on being virtual text.
         local hint
         local marked = 0
+        local counted = false
         for _, m in ipairs(vim.api.nvim_buf_get_extmarks(pbuf, -1, 0, -1, { details = true })) do
             local vt = m[4] and m[4].virt_text
             if vt and vt[1][2] == "DiagnosticVirtualTextWarn" then hint = vim.trim(vt[1][1]) end
+            if vt and vt[1][2] == "NonText" then counted = true end
             if m[4] and m[4].hl_group == "DiagnosticUnderlineWarn" then marked = marked + 1 end
         end
-        return seen_query, seen_flags, hint, marked
+        return seen_query, seen_flags, hint, marked, counted
     end
 
     after_each(function() vim.cmd("silent! close!") end)
@@ -175,6 +189,24 @@ describe("picker query hints", function()
     it("speaks up once the cursor leaves what it points at", function()
         assert.is_truthy(select(3, type_query('--dir "My Doc', 2)):find('unclosed "', 1, true))
         assert.is_truthy(select(3, type_query("--case sm x")):find("smart|on|off", 1, true))
+    end)
+
+    it("speaks up on the cursor leaving alone, with nothing more typed", function()
+        -- Held hints are chosen against where the cursor is, so moving away has
+        -- to be reason enough to look again. Waiting on the next keystroke never
+        -- comes for the line that is finished except for the mistake in it.
+        assert.is_truthy(select(3, type_query("--case sm", nil, 0)):find("smart|on|off", 1, true))
+        assert.is_truthy(select(3, type_query("--hiddn", nil, 0)):find("--hidden", 1, true))
+        assert.is_truthy(select(3, type_query("--dir", nil, 0)):find("needs a value", 1, true))
+    end)
+
+    it("hands the corner back to the position counter when the cursor returns", function()
+        -- The two share one corner and the hint takes it; showing a hint has to
+        -- put the count back on the way out, or it goes missing for good.
+        assert.is_false(select(5, type_query("--case sm", nil, 0)))
+        local hint, _, counted = select(3, type_query("--case sm", nil, { 0, 9 }))
+        assert.is_nil(hint)
+        assert.is_true(counted)
     end)
 
     it("searches for a typo'd flag and suggests the real one", function()

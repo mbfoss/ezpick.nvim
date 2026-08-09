@@ -155,6 +155,10 @@ form is the exact one: it can carry an empty value (`--replace=`) or a value
 that looks like a flag (`--dir=--x`). Names are matched loosely — `--no-ignore`,
 `--noignore` and `--NoIgnore` are the same flag.
 
+A switch is set by being written, so it takes no value at all: `--hidden=false`
+and `--hidden=true` are the same mistake, and both leave the switch alone rather
+than guess which reading was meant.
+
 A standalone `--` ends the flagged section, for the one case that needs it: a
 query starting with a flag name.
 

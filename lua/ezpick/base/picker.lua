@@ -102,6 +102,9 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---flag given twice, a value on a switch --- are already settled mistakes and say
 ---so immediately, as does any hint `parse` itself marks `settled`: a kind that
 ---is usually mid-typing can still turn up in a state typing cannot get out of.
+---
+---`parse` reports everything it can see and holds nothing back, having no cursor
+---to hold it against; this table and `_at_cursor` are the whole of that judgment.
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
 	["missing-value"]  = true,
@@ -365,6 +368,7 @@ end
 ---@field _last_flags table?
 ---@field _suppress_autocomplete boolean?
 ---@field _query_hint string? -- message of the query hint currently shown in the prompt
+---@field _hint_col integer? -- prompt cursor column the shown hints were chosen for
 ---@field _list_sep_line string
 ---@field _show_list_sep boolean
 local Picker = {}
@@ -745,6 +749,7 @@ function Picker:render_prompt_highlight(query)
 	-- is an unclosed one, and saying so on the way through helps nobody. Those
 	-- wait for the cursor to leave; a mistake that is already complete does not.
 	local cursor = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
+	self._hint_col = cursor
 	local shown  = {}
 	for _, hint in ipairs(queryflags.parse(self.opts.flags, query).hints) do
 		if hint.settled or not (_HELD_WHILE_TYPING[hint.kind] and _at_cursor(query, hint, cursor)) then
@@ -1464,6 +1469,24 @@ function Picker:setup_input()
 				if ev.event == "TextChangedI" then self:maybe_autocomplete() end
 			end
 		})
+
+		-- Which hints are held depends on where the cursor is, so leaving a
+		-- half-written flag has to be an event of its own: without this the
+		-- hint waits for the next keystroke, and a query finished with a typo
+		-- in it -- nothing left to type -- never says anything at all.
+		if #self.opts.flags > 0 then
+			vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+				buffer = self.pbuf,
+				callback = function()
+					if self.closed or not self.pwin then return end
+					-- Typing moves the cursor too, and the text path has just
+					-- drawn these same hints for this same column.
+					if vim.api.nvim_win_get_cursor(self.pwin)[2] == self._hint_col then return end
+					self:render_prompt_highlight(self.query_text)
+					self:render_position()
+				end
+			})
+		end
 	end
 
 	do

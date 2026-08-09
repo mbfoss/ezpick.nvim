@@ -9,7 +9,7 @@ local M = {}
 ---@field name     string
 ---@field type     "boolean"|"value"
 ---@field multi    boolean?   -- allow multiple occurrences (type=value only)
----@field strict   boolean?   -- `values` is the complete set; anything else is hinted (type=value only)
+---@field strict   boolean?   -- `values` is the complete set; anything else is hinted (type=value only, requires `values`)
 ---@field values   string[]?  -- known static values offered in completion (type=value only)
 ---@field complete ezpick.queryflags.CompleteSpec?  -- dynamic value completion source (type=value only)
 ---@field alias    string[]?  -- extra names accepted for this flag
@@ -25,6 +25,12 @@ local M = {}
 
 ---A problem worth pointing out that is never worth refusing to search over:
 ---every hint is advisory, and `parse` always returns a usable query beside it.
+---
+---Everything wrong with the line is reported, including the half-written states
+---any correct flag passes through on the way to being one. Telling those apart
+---takes the cursor, which `parse` does not have: a consumer that shows hints as
+---they are typed holds back the kinds that typing can still resolve until the
+---cursor leaves the span --- except where `settled` says typing on cannot.
 ---@class ezpick.queryflags.Hint
 ---@field start   integer  -- 0-indexed byte start of the offending span
 ---@field finish  integer  -- 0-indexed byte end of the offending span (exclusive)
@@ -102,6 +108,7 @@ local _PATH_COMPLETE = {
 ---@field start   integer                        -- 1-indexed start in source
 ---@field finish  integer                        -- 1-indexed finish in source (inclusive)
 ---@field name    string?                        -- canonical flag this piece names (kind="flag") or feeds (kind="value")
+---@field typed   string?                        -- how that flag was actually spelled here, which `name` may only be a synonym of
 ---@field text    string?                        -- decoded value, quotes and escapes resolved (kind="value")
 ---@field eq      integer?                       -- 1-indexed position of the '=' gluing a value on (kind="flag")
 ---@field quote   {open:integer,close:integer?}? -- 1-indexed positions of the value quote chars; close=nil when unterminated
@@ -121,6 +128,12 @@ end
 local function _build_map(schema)
     local m = {}
     for _, def in ipairs(schema) do
+        -- Strictness is enforced against `values`, so a strict flag that lists
+        -- none would quietly accept everything. That is a schema mistake rather
+        -- than a user one, and it is worth hearing about on the first render
+        -- instead of never: everything downstream may take the pair as given.
+        assert(not def.strict or (def.values and #def.values > 0),
+            ("%s%s is strict but lists no values"):format(_PREFIX, def.name))
         m[_key(def.name)] = def
         for _, alias in ipairs(def.alias or {}) do m[_key(alias)] = def end
     end
@@ -145,7 +158,9 @@ local function _edit_distance(a, b)
 end
 
 ---The flag a misspelling was probably reaching for: a name it is a prefix of,
----or failing that the nearest one within a couple of typos.
+---or failing that the nearest one within a couple of typos. Aliases are
+---candidates too, and the spelling that matched is the one suggested --- it is
+---the name being reached for, and it works exactly as well as the canonical one.
 ---@param schema ezpick.queryflags.FlagDef[]
 ---@param typed  string
 ---@return string?
@@ -154,8 +169,10 @@ local function _did_you_mean(schema, typed)
     if key == "" then return nil end
 
     local best, best_dist
-    for _, def in ipairs(schema) do
-        local cand = _key(def.name)
+
+    ---@param name string
+    local function consider(name)
+        local cand = _key(name)
         local dist
         if vim.startswith(cand, key) then
             dist = 0
@@ -164,8 +181,13 @@ local function _did_you_mean(schema, typed)
             if dist > math.min(2, #key) then dist = nil end
         end
         if dist and (not best_dist or dist < best_dist) then
-            best, best_dist = def.name, dist
+            best, best_dist = name, dist
         end
+    end
+
+    for _, def in ipairs(schema) do
+        consider(def.name)
+        for _, alias in ipairs(def.alias or {}) do consider(alias) end
     end
 
     return best
@@ -265,13 +287,17 @@ local function _scan(str, defs, schema)
         hints[#hints + 1] = { kind = kind, start = s - 1, finish = e, msg = msg, settled = settled or nil }
     end
 
-    ---@param def ezpick.queryflags.FlagDef
+    ---Every message echoes the spelling on the line rather than the canonical
+    ---name: the mark and the words have to describe the same thing, and with an
+    ---alias in play the canonical name may be nowhere in sight.
+    ---@param def   ezpick.queryflags.FlagDef
+    ---@param typed string  -- the flag as written here
     ---@return string
-    local function needs_value(def)
-        if def.strict and def.values and #def.values > 0 then
-            return ("%s%s: %s"):format(_PREFIX, def.name, table.concat(def.values, "|"))
+    local function needs_value(def, typed)
+        if def.strict then
+            return ("%s%s: %s"):format(_PREFIX, typed, table.concat(assert(def.values), "|"))
         end
-        return ("%s%s needs a value"):format(_PREFIX, def.name)
+        return ("%s%s needs a value"):format(_PREFIX, typed)
     end
 
     while i <= len do
@@ -292,27 +318,26 @@ local function _scan(str, defs, schema)
         local def            = name and defs[_key(name)]
         if not def then
             -- Not a flag, so this is where the query begins. A dashed word that
-            -- merely misses the schema is worth a nudge -- unless it is still
-            -- being typed, when every prefix would look like a typo.
+            -- merely misses the schema is worth a nudge. Whether it is a typo or
+            -- a prefix still being typed is not decided here: only the cursor
+            -- tells those two apart, and the consumer is the one holding it.
             if name then
-                local word_end = name_end
-                assert(word_end)
-                if word_end < len then
-                    local suggestion = _did_you_mean(schema, name)
-                    hint("unknown-flag", tok_start, word_end,
-                        suggestion
-                        and ("unknown %s%s, try %s%s"):format(_PREFIX, name, _PREFIX, suggestion)
-                        or ("unknown %s%s"):format(_PREFIX, name))
-                end
+                assert(name_end)
+                local suggestion = _did_you_mean(schema, name)
+                hint("unknown-flag", tok_start, name_end,
+                    suggestion
+                    and ("unknown %s%s, try %s%s"):format(_PREFIX, name, _PREFIX, suggestion)
+                    or ("unknown %s%s"):format(_PREFIX, name))
             end
             return pieces, tok_start, hints, nil
         end
 
-        assert(name_end)
+        -- A def was only found by looking a name up, so both are written here.
+        assert(name and name_end)
         i = name_end + 1
 
         ---@type ezpick.queryflags.Piece
-        local flag_piece = { kind = "flag", start = tok_start, finish = name_end, name = def.name }
+        local flag_piece = { kind = "flag", start = tok_start, finish = name_end, name = def.name, typed = name }
         pieces[#pieces + 1] = flag_piece
 
         if str:sub(i, i) == "=" then
@@ -323,10 +348,17 @@ local function _scan(str, defs, schema)
             local value
             value, i = _read_value(str, i)
             value.name = def.name
+            value.typed = name
             flag_piece.finish = value.finish
             if def.type == "boolean" then
+                -- A switch is written by being there, so there is no value it
+                -- could be assigned that would be right: "--fixed=false" reads
+                -- as turning something off and "--fixed=true" as belt and
+                -- braces, and neither is a form this understands. Both are the
+                -- same mistake, and `parse` leaves the switch alone rather than
+                -- picking the reading that happens to be spelled out.
                 hint("unexpected-value", tok_start, value.finish,
-                    ("%s%s takes no value"):format(_PREFIX, def.name))
+                    ("%s%s takes no value"):format(_PREFIX, name))
             else
                 pieces[#pieces + 1] = value
             end
@@ -342,18 +374,19 @@ local function _scan(str, defs, schema)
                 -- "--mode" is a name still being typed -- perhaps into "--modes"
                 -- -- and offering it values would complete the wrong thing.
                 if i <= len then pending = def end
-                hint("missing-value", tok_start, name_end, needs_value(def))
+                hint("missing-value", tok_start, name_end, needs_value(def, name))
             elseif next_sep or (next_name and defs[_key(next_name)]) then
                 -- Something already stands where the value would go, so the slot
                 -- is closed: unlike the open one above, typing on at the end of
                 -- the line will never fill it. Settled, and said at once --- it
                 -- is exactly the state a value deleted from the middle leaves
                 -- behind, and going quiet there rewards making the line worse.
-                hint("missing-value", tok_start, name_end, needs_value(def), true)
+                hint("missing-value", tok_start, name_end, needs_value(def, name), true)
             else
                 local value
                 value, i = _read_value(str, j)
                 value.name = def.name
+                value.typed = name
                 pieces[#pieces + 1] = value
             end
         end
@@ -370,7 +403,7 @@ function M.parse(schema, raw)
     local flags                        = {}
     local pieces, query_start, hints   = _scan(raw, defs, schema)
     ---Name spans of every occurrence of each single-valued flag, left to right.
-    ---@type table<string, {start:integer, finish:integer}[]>
+    ---@type table<string, {start:integer, finish:integer, typed:string}[]>
     local occurrences                  = {}
     ---@type ezpick.queryflags.Piece?
     local last_flag                    = nil
@@ -381,11 +414,18 @@ function M.parse(schema, raw)
         if piece.kind == "flag" then
             last_flag = piece
             -- A value flag's value is a piece of its own; only switches are
-            -- carried by the name itself.
-            if defs[_key(piece.name)].type == "boolean" then flags[piece.name] = true end
+            -- carried by the name itself -- and only when written as one. An
+            -- assignment to a switch is a mistake either way round (see the
+            -- "unexpected-value" hint), so it turns nothing on: reading
+            -- "--fixed=false" as fixed would be the opposite of what it says.
+            if defs[_key(piece.name)].type == "boolean" and not piece.eq then
+                flags[piece.name] = true
+            end
         elseif piece.kind == "value" then
             local def   = defs[_key(piece.name)]
             local value = piece.text
+            -- A value is only ever pushed right behind the flag it feeds.
+            local flag  = assert(last_flag)
 
             if piece.quote and not piece.quote.close then
                 hints[#hints + 1] = {
@@ -398,15 +438,20 @@ function M.parse(schema, raw)
 
             -- A value written out is a value meant, even an empty one: "--repl="
             -- is how an empty replacement is asked for.
-            if def.strict and def.values and not vim.tbl_contains(def.values, value) then
-                -- Silent while the value is still being typed at the end of the
-                -- line; a prefix of a valid choice is not yet a wrong one.
-                if piece.finish < #raw then
+            if def.strict then
+                local values = assert(def.values)
+                if not vim.tbl_contains(values, value) then
+                    -- Whether a prefix of a valid choice is a wrong value or an
+                    -- unfinished one is the cursor's answer to give, not ours.
+                    -- An empty value has no span of its own to point at
+                    -- ("--case="), so the mark falls back to the flag that went
+                    -- without one.
+                    local spanned = piece.finish >= piece.start
                     hints[#hints + 1] = {
                         kind   = "bad-value",
-                        start  = piece.start - 1,
-                        finish = piece.finish,
-                        msg    = ("%s%s: %s"):format(_PREFIX, def.name, table.concat(def.values, "|")),
+                        start  = (spanned and piece.start or flag.start) - 1,
+                        finish = spanned and piece.finish or flag.finish,
+                        msg    = ("%s%s: %s"):format(_PREFIX, piece.typed, table.concat(values, "|")),
                     }
                 end
             end
@@ -419,14 +464,13 @@ function M.parse(schema, raw)
                 -- it displaces leave no mark on the line: every occurrence still
                 -- reads as an accepted flag. Note where they are, to say so once
                 -- the winner is known.
-                if last_flag then
-                    local spans = occurrences[piece.name] or {}
-                    spans[#spans + 1] = {
-                        start  = last_flag.start - 1,
-                        finish = last_flag.eq and (last_flag.eq - 1) or last_flag.finish,
-                    }
-                    occurrences[piece.name] = spans
-                end
+                local spans = occurrences[piece.name] or {}
+                spans[#spans + 1] = {
+                    start  = flag.start - 1,
+                    finish = flag.eq and (flag.eq - 1) or flag.finish,
+                    typed  = assert(flag.typed),
+                }
+                occurrences[piece.name] = spans
                 flags[piece.name] = value
             end
         end
@@ -437,13 +481,14 @@ function M.parse(schema, raw)
     -- which one that is depends on what else the line has to say.
     for name, spans in pairs(occurrences) do
         if #spans > 1 then
-            local msg = ("%s%s set %d times, using '%s'"):format(_PREFIX, name, #spans, flags[name])
             for _, span in ipairs(spans) do
                 hints[#hints + 1] = {
                     kind   = "duplicate-flag",
                     start  = span.start,
                     finish = span.finish,
-                    msg    = msg,
+                    -- Each mark speaks for the spelling it sits on: two aliases
+                    -- of one flag are one repetition, told twice in two names.
+                    msg    = ("%s%s set %d times, using '%s'"):format(_PREFIX, span.typed, #spans, flags[name]),
                 }
             end
         end

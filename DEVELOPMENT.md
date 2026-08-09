@@ -56,9 +56,13 @@ tests/                   plenary busted specs
   none, so `ParseResult.query` is a verbatim slice from `query_start` — pickers
   that grep for what was typed depend on that. Quoting is local to a value. A
   standalone `--` ends the flagged section for a query that must start with a
-  flag name. `parse` never fails: anything doubtful comes back as an advisory
-  `ParseResult.hints` entry beside a usable query, which the picker underlines
-  in the prompt rather than acting on.
+  flag name. `parse` never fails on what was typed: anything doubtful comes back
+  as an advisory `ParseResult.hints` entry beside a usable query, which the
+  picker underlines in the prompt rather than acting on. (A malformed *schema*
+  does fail, at once — `strict` without `values` asserts.) Every problem is
+  reported, including the half-written states a correct flag passes through:
+  telling those apart takes the cursor, so the picker is where a hint is held
+  back until the cursor leaves what it points at.
 - **`layouts.lua`** — geometry for the list/preview floats.
 
 ### Sources
