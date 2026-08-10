@@ -46,6 +46,7 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@class ezpick.Picker.FetcherOpts
 ---@field list_width number
 ---@field list_height number
+---@field virt_line_width number
 ---@field parsed ezpick.queryflags.ParseResult?
 ---@field data table? Setup data supplied by the picker spec.
 
@@ -1129,7 +1130,6 @@ end
 
 function Picker:start_spinner()
 	if self.spinner then return end
-
 	self.spinner = Spinner:new {
 		interval = 100,
 		on_update = function(frame)
@@ -1137,7 +1137,6 @@ function Picker:start_spinner()
 			self:render_spinner()
 		end
 	}
-
 	self.spinner:start()
 end
 
@@ -1146,7 +1145,6 @@ function Picker:stop_spinner()
 		self.spinner:stop()
 		self.spinner = nil
 	end
-
 	self._spinner_frame = nil
 	self:render_spinner()
 end
@@ -1313,6 +1311,7 @@ function Picker:run_fetch()
 		-- the prefix every row is written behind, not for the border.
 		list_width  = math.max(1, self.layout.list_width - 2),
 		list_height = math.max(1, self.layout.list_height),
+		virt_line_width = math.max(1, self.layout.list_width - 5),
 	}
 
 	local clean_query, flags
@@ -1343,7 +1342,6 @@ function Picker:run_fetch()
 		self.async_fetch_cancel = nil
 	end
 
-	self:stop_spinner()
 	self:request_clear_preview()
 
 	self.async_fetch_context = self.async_fetch_context + 1

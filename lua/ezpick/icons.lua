@@ -1,38 +1,72 @@
---- Filetype icons, sourced from keystone.nvim when that plugin is installed.
---- ezpick has no icon data of its own: without keystone.nvim, no icons.
+--- Filetype icons, sourced from an installed icon provider.
+--- ezpick has no icon data of its own and does not require any particular
+--- icon plugin. Providers are detected lazily and cached.
 ---@class ezpick.icon.Module
 local M = {}
 
 ---@type boolean
 local _resolved = false
 
----@type table|nil keystone.icon.Module, when keystone.nvim is installed
-local _keystone
+---@class ezpick.icon.Provider
+---@field get_icon fun(filename?: string, extension?: string, opts?: table): string?, string?
 
---- Look up `keystone.icons` on first use. The lookup happens lazily so ezpick
---- never forces keystone.nvim to load, and is cached either way.
----@return table|nil
+---@type ezpick.icon.Provider|nil
+local _provider
+
+---@return ezpick.icon.Provider|nil
 local function _resolve()
-    if not _resolved then
-        _resolved = true
-        local ok, mod = pcall(require, "keystone.icons")
-        _keystone = ok and mod or nil
+    if _resolved then
+        return _provider
     end
-    return _keystone
+    _resolved = true
+    local ok, mod
+    -- keystone.nvim
+    ok, mod = pcall(require, "keystone.icons")
+    if ok then
+        _provider = {
+            get_icon = function(filename, extension, opts)
+                return mod.get_icon(filename, extension, opts)
+            end,
+        }
+        return _provider
+    end
+    -- nvim-web-icon
+    ok, mod = pcall(require, "nvim-web-icon")
+    if ok then
+        _provider = {
+            get_icon = function(filename, extension, opts)
+                return mod.get_icon(filename, extension, opts)
+            end,
+        }
+        return _provider
+    end
+    -- mini.icons
+    ok, mod = pcall(require, "mini.icons")
+    if ok then
+        _provider = {
+            get_icon = function(filename)
+                local icon, hl = mod.get("file", filename)
+                return icon, hl
+            end,
+        }
+        return _provider
+    end
+    return nil
 end
 
---- Icon and highlight group for a file, or `nil, nil` when no icon provider is
---- available.
+--- Get the icon and highlight group for a file, or `nil, nil` when no icon
+--- provider is available.
 ---@param filename? string
 ---@param extension? string
 ---@param opts? table
 ---@return string?, string?
 function M.get_icon(filename, extension, opts)
-    local keystone = _resolve()
-    if not keystone then
+    local provider = _resolve()
+    if not provider then
         return nil, nil
     end
-    return keystone.get_icon(filename, extension, opts)
+
+    return provider.get_icon(filename, extension, opts)
 end
 
 return M

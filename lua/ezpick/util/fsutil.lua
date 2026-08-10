@@ -44,24 +44,6 @@ function M.create_file(path)
 end
 
 ---@param path string
----@param max_len number
----@return string preview
----@return boolean is_different
-function M.smart_crop_path(path, max_len)
-    max_len = math.max(max_len, 0)
-    local len = #path
-    if len <= max_len then return path, false end
-    local limit = max_len - 1
-    local sep = package.config:sub(1, 1)
-    local tail = path:sub(-limit)
-    local sep_pos = tail:find(sep)
-    if sep_pos then
-        return "…" .. tail:sub(sep_pos), true
-    end
-    return "…" .. tail, true
-end
-
----@param path string
 ---@param base string?
 function M.get_relative_path(path, base)
     base = base or vim.fn.getcwd()

@@ -401,17 +401,17 @@ local _BUFFER_INDICATOR_WIDTH = vim.fn.strdisplaywidth(_BUFFER_INDICATOR)
 ---@param m           ezpick.rgutil.Match
 ---@param abs_path    string
 ---@param cwd         string
----@param list_width  integer
+---@param path_width  integer
 ---@param show_repl   boolean?
 ---@param rel_path    string?  precomputed cwd-relative path (avoids recomputation)
 ---@param from_buffer boolean?  match came from an open buffer, not disk
 ---@return ezpick.Picker.Item
-local function make_item(m, abs_path, cwd, list_width, show_repl, rel_path, from_buffer)
+local function make_item(m, abs_path, cwd, path_width, show_repl, rel_path, from_buffer)
     rel_path = rel_path or fsutil.get_relative_path(abs_path, cwd) or abs_path
     local indicator_width = from_buffer and _BUFFER_INDICATOR_WIDTH or 0
-    local location = fsutil.smart_crop_path(
+    local location = strutil.crop_for_ui(
         string.format("%s:%s", rel_path, m.lnum),
-        list_width - indicator_width
+        path_width - indicator_width, true
     )
     local virt_line = {}
     if from_buffer then
@@ -520,7 +520,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
     local show_repl   = parsed.flags.replace ~= nil
     local max_results = grep_opts.max_results or 10000
     local cwd         = grep_opts.cwd
-    local list_width  = fetch_opts.list_width
+    local path_width  = fetch_opts.virt_line_width
 
     -- Open buffers take priority: search their in-memory text, then drop the
     -- on-disk matches for those same files so stale disk content never wins.
@@ -584,7 +584,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
                         m.lnum = lnum
                         m.path = b.path
                         buf_items[#buf_items + 1] =
-                            make_item(m, b.path, cwd, list_width, show_repl, b.relpath, true)
+                            make_item(m, b.path, cwd, path_width, show_repl, b.relpath, true)
                         buf_count = buf_count + 1
                         if buf_count >= max_results then
                             stop_buf = true
@@ -667,7 +667,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
                 -- Skip files already covered by the in-buffer search.
                 if not (rel_path and open_relpaths[rel_path]) then
                     dir_items[#dir_items + 1] =
-                        make_item(m, abs_path, cwd, list_width, show_repl, rel_path)
+                        make_item(m, abs_path, cwd, path_width, show_repl, rel_path)
                     count = count + 1
                     if count >= max_results then
                         stop_read = true

@@ -3,6 +3,7 @@ local M                  = {}
 local ui                 = require("ezpick.util.ui")
 local pickertools        = require("ezpick.base.pickertools")
 local fsutil             = require("ezpick.util.fsutil")
+local strutil            = require("ezpick.util.strutil")
 
 local _kind_to_str_cache = {}
 ---@param kind number LSP SymbolKind (integer)
@@ -86,6 +87,7 @@ local function locations_spec(opts)
         params.context = { includeDeclaration = true }
     end
 
+    ---@type ezpick.PickerSpec
     return {
         prompt          = opts.prompt,
         flags           = REF_FLAGS,
@@ -138,7 +140,7 @@ local function locations_spec(opts)
                 local match = pickertools.match_label(text, query)
                 if match then
                     local loc = ref.lnum and string.format("%s:%d", display_path, ref.lnum) or display_path
-                    loc = fsutil.smart_crop_path(loc, fetch_opts.list_width)
+                    loc = strutil.crop_for_ui(loc, fetch_opts.virt_line_width, true)
                     ---@type ezpick.Picker.Item
                     table.insert(picker_items, {
                         label_chunks = match.chunks,
@@ -296,6 +298,7 @@ local function calls_spec(opts)
 
     local params = vim.lsp.util.make_position_params(0, "utf-8")
 
+    ---@type ezpick.PickerSpec?
     return {
         prompt         = opts.prompt,
         flags          = REF_FLAGS,
@@ -369,8 +372,8 @@ local function calls_spec(opts)
                     local chunks = match.chunks
                     table.insert(chunks, { (" (%s)"):format(entry.kind), "Comment" })
 
-                    local loc = fsutil.smart_crop_path(
-                        ("%s:%d"):format(display_path, entry.lnum), fetch_opts.list_width)
+                    local loc = strutil.crop_for_ui(
+                        ("%s:%d"):format(display_path, entry.lnum), fetch_opts.virt_line_width, true)
 
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
@@ -549,6 +552,7 @@ function M.workspace_symbols_spec(opts)
         return nil
     end
 
+    ---@type ezpick.PickerSpec?
     return {
         prompt         = "Workspace Symbols",
         flags          = SYMBOL_FLAGS,
@@ -627,9 +631,9 @@ function M.workspace_symbols_spec(opts)
                         table.insert(chunks, { "  " .. sym.container, "Comment" })
                     end
 
-                    local loc = fsutil.smart_crop_path(
+                    local loc = strutil.crop_for_ui(
                         ("%s:%d"):format(fsutil.get_relative_path(sym.filepath) or sym.filepath, sym.lnum),
-                        fetch_opts.list_width)
+                        fetch_opts.virt_line_width, true)
 
                     ---@type ezpick.Picker.Item
                     table.insert(items, {

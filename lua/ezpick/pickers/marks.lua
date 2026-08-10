@@ -3,6 +3,7 @@ local M           = {}
 local pickertools = require("ezpick.base.pickertools")
 local ui          = require("ezpick.util.ui")
 local fsutil      = require("ezpick.util.fsutil")
+local strutil     = require("ezpick.util.strutil")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
@@ -86,6 +87,7 @@ function M.spec()
         return nil
     end
 
+    ---@type ezpick.PickerSpec?
     return {
         prompt         = "Marks",
         flags          = FLAGS,
@@ -114,7 +116,7 @@ function M.spec()
                     -- the sort above groups them the way that letter is read.
                     table.insert(items, {
                         label_chunks = chunks,
-                        virt_line    = { { fsutil.smart_crop_path(loc, fetch_opts.list_width), "EzPickPath" } },
+                        virt_line    = { { strutil.crop_for_ui(loc, fetch_opts.virt_line_width, true), "EzPickPath" } },
                         data         = {
                             bufnr    = entry.bufnr,
                             filepath = entry.filepath,
