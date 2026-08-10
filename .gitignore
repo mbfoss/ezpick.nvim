@@ -45,3 +45,4 @@ luac.out
 .claude/settings.json
 /.claude
 .luarc.json
+.ezdap.json

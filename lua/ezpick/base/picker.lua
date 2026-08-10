@@ -435,10 +435,10 @@ function Picker:init(opts, callback)
 	-- Load-bearing pcall: `expand` throws E348 when there is no word under the
 	-- cursor, which is the ordinary state of a blank line. It only returns a
 	-- list when asked to, which this is not, hence the cast.
-	local ok, cword            = pcall(vim.fn.expand, "<cword>")
-	self.original_cword        = (ok and cword or "") --[[@as string]]
+	local ok, cword     = pcall(vim.fn.expand, "<cword>")
+	self.original_cword = (ok and cword or "") --[[@as string]]
 
-	_active_picker = self
+	_active_picker      = self
 
 	self:setup_ui()
 	self:setup_input()
@@ -461,21 +461,16 @@ end
 
 function Picker:apply_prompt()
 	if self.closed then return end
+	-- A multi-line paste is flattened onto the one line the prompt has
 	local nlines = vim.api.nvim_buf_line_count(self.pbuf)
-	-- A multi-line paste is flattened onto the one line the prompt has. The
-	-- lines are joined with a space rather than butted together, so pasting two
-	-- words does not silently make a third one out of them.
-	local raw = nlines > 1
-		and table.concat(vim.api.nvim_buf_get_lines(self.pbuf, 0, -1, false), " ")
-		or (vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "")
+	local lines = vim.api.nvim_buf_get_lines(self.pbuf, 0, -1, false)
+	local raw = lines[1] or ""
 	local text = raw:gsub("[%c]", "")
-
 	if nlines > 1 or text ~= raw then
 		local col = vim.api.nvim_win_get_cursor(self.pwin)[2]
 		vim.api.nvim_buf_set_lines(self.pbuf, 0, -1, false, { text })
 		vim.api.nvim_win_set_cursor(self.pwin, { 1, math.min(col, #text) })
 	end
-
 	-- Before the fetch: the query just typed may have wrapped onto another line,
 	-- and the list is laid out again to make room for it. `render_prompt_highlight`
 	-- syncs too, but it only runs when the query itself changed -- a line edited
@@ -531,9 +526,9 @@ function Picker:setup_ui()
 	-- values may open with `"`, neither of which is a keyword character, so under
 	-- <C-x><C-u> the second dash of "--" would dismiss the menu. Omni completion accepts
 	-- any printable non-blank character, which is exactly the alphabet of a flag.
-	local completefunc              = "v:lua.require'ezpick.base.picker'._flag_completefunc"
-	vim.bo[self.pbuf].omnifunc      = completefunc
-	vim.bo[self.pbuf].completefunc  = completefunc
+	local completefunc                 = "v:lua.require'ezpick.base.picker'._flag_completefunc"
+	vim.bo[self.pbuf].omnifunc         = completefunc
+	vim.bo[self.pbuf].completefunc     = completefunc
 	vim.b[self.pbuf].ezpick_completion = { flags = self.opts.flags }
 	-- Hook into CompleteDone to restore highlights and trigger a fetch update
 	vim.api.nvim_create_autocmd("CompleteDone", {
@@ -880,9 +875,9 @@ function Picker:_render_prompt_marks(query)
 	-- unfinished typing: half of "--dir" is a missing value and an opening quote
 	-- is an unclosed one, and saying so on the way through helps nobody. Those
 	-- wait for the cursor to leave; a mistake that is already complete does not.
-	local cursor = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
+	local cursor   = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
 	self._hint_col = cursor
-	local shown  = {}
+	local shown    = {}
 	for _, hint in ipairs(queryflags.parse(self.opts.flags, query).hints) do
 		if hint.settled or not (_HELD_WHILE_TYPING[hint.kind] and _at_cursor(query, hint, cursor)) then
 			table.insert(shown, hint)
@@ -1209,15 +1204,15 @@ function Picker:set_items(items)
 	items = items or {}
 	if not self.lbuf then return end
 
-	local prefix = _LIST_PREFIX
-	local count  = #items
+	local prefix     = _LIST_PREFIX
+	local count      = #items
 
 	local list_items = tbl_new(count, 0) ---@type ezpick.picker.ListItem[]
 	local lines      = tbl_new(count, 0) ---@type string[]
 
 	for row_idx = 1, count do
-		local item   = items[row_idx]
-		local chunks = item.label_chunks
+		local item          = items[row_idx]
+		local chunks        = item.label_chunks
 
 		list_items[row_idx] = {
 			data = item.data,
@@ -1273,7 +1268,7 @@ function Picker:set_items(items)
 
 		local vlines
 		if item.virt_line and #item.virt_line > 0 then
-			local vl = { { prefix }, {"╰─ ", "NonText"} }
+			local vl = { { prefix }, { "╰─ ", "NonText" } }
 			vim.list_extend(vl, item.virt_line)
 			vlines = { vl }
 		end
@@ -1309,8 +1304,8 @@ function Picker:run_fetch()
 	local fetch_opts = {
 		-- The window width is the content area; the two columns come off for
 		-- the prefix every row is written behind, not for the border.
-		list_width  = math.max(1, self.layout.list_width - 2),
-		list_height = math.max(1, self.layout.list_height),
+		list_width      = math.max(1, self.layout.list_width - 2),
+		list_height     = math.max(1, self.layout.list_height),
 		virt_line_width = math.max(1, self.layout.list_width - 5),
 	}
 
