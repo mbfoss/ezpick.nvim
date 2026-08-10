@@ -14,7 +14,6 @@ local M                  = {}
 
 local _NS_CURSOR         = vim.api.nvim_create_namespace("ezpick_PickerCursor")
 local _NS_CONTENT        = vim.api.nvim_create_namespace("ezpick_PickerContent")
-local _NS_SPINNER        = vim.api.nvim_create_namespace("ezpick_PickerSpinner")
 local _NS_PREVIEW        = vim.api.nvim_create_namespace("ezpick_PickerPreview")
 
 -- Completion result carrying no candidates. `refresh = "always"` has to ride along
@@ -380,6 +379,7 @@ end
 ---@field _suppress_autocomplete boolean?
 ---@field _query_hint string? -- message of the query hint currently shown in the prompt
 ---@field _hint_col integer? -- prompt cursor column the shown hints were chosen for
+---@field _spinner_frame string? -- spinner frame currently drawn on the prompt line, nil when idle
 ---@field _prompt_wrapped integer -- screen lines the prompt took when the picker was last laid out
 ---@field _in_relayout boolean? -- set while `relayout` runs, to keep the renderers it calls from calling it back
 local Picker = {}
@@ -418,6 +418,7 @@ function Picker:init(opts, callback)
 	self.async_preview_cancel  = nil
 
 	self.spinner               = nil
+	self._spinner_frame        = nil
 
 	self.query_text            = ""
 
@@ -648,6 +649,10 @@ function Picker:relayout()
 			border = self.layout.prompt_border,
 			title = title,
 			title_pos = "center",
+			-- The rule below the prompt is this float's bottom border, so the
+			-- status indicators ride on it as a footer; see `render_status`.
+			footer = self:_status_chunks() or "",
+			footer_pos = "right",
 		})
 	end
 
@@ -897,24 +902,51 @@ function Picker:_render_prompt_marks(query)
 	self:_set_prompt_hint(_NS_CONTENT, shown[1].msg, "DiagnosticVirtualTextWarn", 100)
 end
 
-function Picker:render_position()
-	if not self.pbuf then return end
-	vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CURSOR, 0, -1)
-	-- The hint occupies the same corner and is the more urgent of the two.
-	if self._query_hint then return end
+---Redraw the rule so the current spinner frame appears or disappears. The
+---spinner rides in the footer next to the count, so drawing it is just a status
+---redraw.
+---@return nil
+function Picker:render_spinner()
+	self:render_status()
+end
+
+---Chunks for the rule below the prompt: the spinner while a fetch is in flight,
+---then the position counter. They live on the rule rather than on the prompt
+---line so that a query long enough to reach the right edge no longer collides
+---with them.
+---@return table[]? footer Footer chunks, nil for a bare rule: neither
+---`nvim_open_win` nor `nvim_win_set_config` takes an empty array, so callers
+---pass `""` in its place.
+function Picker:_status_chunks()
+	local chunks = {}
+	if self._spinner_frame then
+		chunks[#chunks + 1] = { " " .. self._spinner_frame, "NonText" }
+	end
+	-- A hint about the query says more than the count does, and only one of the
+	-- two is shown at a time.
 	local total = #self.list_items
-	if total == 0 then return end
-	local cur = self:get_cursor() or 1
-	local text = string.format(" %d/%d", cur, total)
-	-- Right-aligned rather than on a line of its own like the hints: the counter
-	-- is on screen the whole time, and a row spent on it is a row the list does
-	-- not get. A query long enough to reach the corner takes it.
-	vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CURSOR, 0, 0, {
-		virt_text = { { text, "NonText" } },
-		virt_text_pos = "eol_right_align",
-		hl_mode = "blend",
-		priority = 50,
+	if not self._query_hint and total > 0 then
+		local cur = self:get_cursor() or 1
+		chunks[#chunks + 1] = { string.format(" %d/%d", cur, total), "NonText" }
+	end
+	if #chunks == 0 then return nil end
+	return chunks
+end
+
+---Redraw the rule's right end. The footer is part of the window config, so it
+---is also handed to `prompt_cfg` for the floats `relayout` builds from scratch.
+function Picker:render_status()
+	if not (self.pwin and vim.api.nvim_win_is_valid(self.pwin)) then return end
+	vim.api.nvim_win_set_config(self.pwin, {
+		-- An empty string is how the config clears a footer already drawn.
+		footer = self:_status_chunks() or "",
+		footer_pos = "right",
 	})
+end
+
+---Kept as the name the count's own callers use; the rule carries the count.
+function Picker:render_position()
+	self:render_status()
 end
 
 function Picker:render_cursor()
@@ -922,9 +954,7 @@ function Picker:render_cursor()
 	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CURSOR, 0, -1)
 	local total = #self.list_items
 	if total == 0 then
-		if self.pbuf then
-			vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CURSOR, 0, -1)
-		end
+		self:render_status()
 		return
 	end
 	local cur = self:get_cursor() or 1
@@ -1103,13 +1133,8 @@ function Picker:start_spinner()
 	self.spinner = Spinner:new {
 		interval = 100,
 		on_update = function(frame)
-			if not self.pbuf then return end
-			vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_SPINNER, 0, -1)
-			vim.api.nvim_buf_set_extmark(self.pbuf, _NS_SPINNER, 0, 0, {
-				virt_text = { { " " .. frame, "NonText" } },
-				virt_text_pos = "eol_right_align",
-				priority = 1,
-			})
+			self._spinner_frame = frame
+			self:render_spinner()
 		end
 	}
 
@@ -1122,9 +1147,8 @@ function Picker:stop_spinner()
 		self.spinner = nil
 	end
 
-	if self.pbuf then
-		vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_SPINNER, 0, -1)
-	end
+	self._spinner_frame = nil
+	self:render_spinner()
 end
 
 function Picker:release_external_preview_buf()
