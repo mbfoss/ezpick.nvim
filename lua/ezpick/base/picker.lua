@@ -86,14 +86,17 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field prompt_col number
 ---@field prompt_width number
 ---@field prompt_height number
+---@field prompt_border string|table Border for the prompt float, as `nvim_open_win` takes it.
 ---@field list_row number
 ---@field list_col number
 ---@field list_width number
 ---@field list_height number
+---@field list_border string|table Border for the list float; shares a frame with the prompt, so it draws no top edge.
 ---@field preview_row number
 ---@field preview_col number
 ---@field preview_width number
 ---@field preview_height number
+---@field preview_border string|table Border for the preview float.
 
 
 ---Hints that describe an incomplete thing rather than a wrong one. Every flag
@@ -575,10 +578,11 @@ function Picker:relayout()
 
 	self._list_sep_line = string.rep("─", self.layout.list_width)
 
+	-- The border is per float and comes from the layout: the prompt and the list
+	-- share one frame, each drawing the half of it that is theirs.
 	local base_cfg = {
 		relative = "editor",
 		style = "minimal",
-		border = "rounded"
 	}
 
 	local winhl = _WINHL
@@ -598,6 +602,7 @@ function Picker:relayout()
 				col = self.layout.prompt_col,
 				width = self.layout.prompt_width,
 				height = 1,
+				border = self.layout.prompt_border,
 				title = title,
 				title_pos = "center"
 			}),
@@ -641,6 +646,9 @@ function Picker:relayout()
 			col = self.layout.prompt_col,
 			width = self.layout.prompt_width,
 			height = 1,
+			border = self.layout.prompt_border,
+			title = title,
+			title_pos = "center",
 		}))
 	end
 
@@ -657,7 +665,8 @@ function Picker:relayout()
 				row = self.layout.list_row,
 				col = self.layout.list_col,
 				width = self.layout.list_width,
-				height = self.layout.list_height
+				height = self.layout.list_height,
+				border = self.layout.list_border,
 			}),
 			function()
 				self.lwin = nil
@@ -674,6 +683,7 @@ function Picker:relayout()
 			col = self.layout.list_col,
 			width = self.layout.list_width,
 			height = self.layout.list_height,
+			border = self.layout.list_border,
 		}))
 	end
 
@@ -701,7 +711,7 @@ function Picker:relayout()
 			self.vwin = ui.create_window(self.vbuf, false, {
 					relative = "editor",
 					style = "minimal",
-					border = "rounded",
+					border = self.layout.preview_border,
 					row = self.layout.preview_row,
 					col = self.layout.preview_col,
 					width = self.layout.preview_width,
@@ -725,6 +735,7 @@ function Picker:relayout()
 				col = self.layout.preview_col,
 				width = self.layout.preview_width,
 				height = self.layout.preview_height,
+				border = self.layout.preview_border,
 			}))
 		end
 		self:update_preview()

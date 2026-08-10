@@ -51,7 +51,9 @@ function M.select(items, opts, on_choice)
         local list_width, list_height = _compute_dimentions(_cached)
         geometry = vim.tbl_extend("force", geometry, {
             width_ratio  = (list_width + 2) / vim.o.columns,
-            height_ratio = (list_height + 3) / layouts.usable_lines(),
+            -- Two rows on top of the items: the prompt line and the rule under
+            -- it, the shared frame's other edges being the border ring.
+            height_ratio = (list_height + 2) / layouts.usable_lines(),
         })
     end
 

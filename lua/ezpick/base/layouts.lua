@@ -24,6 +24,26 @@ local _FALLBACK = { width_ratio = 0.6, height_ratio = 0.7 }
 ---has to allow for it or the picker sits two cells low and two cells right.
 local _BORDER_SPAN = 2
 
+---Helix-style framing: the prompt and the list are one box. The prompt draws
+---the top, the sides and the rule dividing the query from the items; the list
+---draws its sides and the bottom, and nothing of its own where the rule already
+---is -- so the two floats read as a single frame. Border order is
+---{tl, t, tr, r, br, b, bl, l}; an empty string means no border there, and no
+---row or column reserved for it.
+---The rule takes its own highlight, a `{char, hl}` pair where the rest of the
+---border is a plain string on `FloatBorder`: it divides the frame rather than
+---bounding it, so it reads better dimmed.
+local _BORDER_TOP = { "╭", "─", "╮", "│", "│", { "─", "NonText" }, "│", "│" }
+local _BORDER_BOTTOM = { "", "", "", "│", "╯", "─", "╰", "│" }
+local _BORDER_FULL = "rounded"
+
+---Rows between the frame's top edge and its first item: the top border, the
+---prompt's line of text, and the rule below it. `nvim_open_win` places a
+---bordered float by its outer edge, so the prompt float covers all three from
+---`prompt_row` -- the list has to start past them or its first row is drawn
+---over by the rule.
+local _PROMPT_ROWS = 3
+
 ---@type fun(v:number,min:number,max:number):number
 local function _clamp(v, min, max)
     return math.max(min, math.min(max, v))
@@ -64,6 +84,9 @@ function M.usable_lines()
     return math.max(1, vim.o.lines - reserved)
 end
 
+---Prompt and list share one frame, helix style, with the preview beside it: the
+---prompt sits directly on top of the items, divided by a rule rather than by two
+---borders and a gap.
 ---@param opts {has_preview:boolean,height_ratio:number?,width_ratio:number?}
 ---@return ezpick.Picker.Layout
 function M.get_horizontal_layout(opts)
@@ -71,6 +94,8 @@ function M.get_horizontal_layout(opts)
     local lines = M.usable_lines()
 
     local has_preview = opts.has_preview
+    -- The two columns where the frame's right border and the preview's left one
+    -- meet; without a preview there is nothing to make room for.
     local spacing = has_preview and 2 or 0
 
     local total_width = _even_gaps(math.ceil(cols * _clamp(opts.width_ratio or _FALLBACK.width_ratio, 0.2, 0.95)), cols)
@@ -85,26 +110,37 @@ function M.get_horizontal_layout(opts)
     end
 
     local total_height = _even_gaps(math.ceil(lines * _clamp(opts.height_ratio or _FALLBACK.height_ratio, 0.3, 0.8)), lines)
-    local list_height = _clamp(total_height - 3, 1, lines)
+    -- The frame's own rows, off the top: the prompt line and the rule under it.
+    -- Its outer border is the ring `_BORDER_SPAN` already pays for.
+    local list_height = _clamp(total_height - 2, 1, lines)
 
     local row = math.floor((lines - total_height - _BORDER_SPAN) / 2)
     local col = math.floor((cols - (list_width + preview_width + spacing) - _BORDER_SPAN) / 2)
 
     return {
+        -- The prompt is only as wide as the list: the two are one box.
         prompt_row = row,
         prompt_col = col,
-        prompt_width = list_width + preview_width + spacing,
+        prompt_width = list_width,
         prompt_height = 1,
+        prompt_border = _BORDER_TOP,
 
-        list_row = row + 3,
+        -- Past the prompt's three rows; the list reserves none of its own up
+        -- there, its first row being the one under the rule.
+        list_row = row + _PROMPT_ROWS,
         list_col = col,
         list_width = list_width,
         list_height = list_height,
+        list_border = _BORDER_BOTTOM,
 
-        preview_row = row + 3,
+        -- Level with the frame beside it, top and bottom alike: its top border
+        -- lands on the same row as the prompt's, so its height is everything the
+        -- frame holds.
+        preview_row = row,
         preview_col = col + list_width + spacing,
         preview_width = preview_width,
-        preview_height = list_height
+        preview_height = list_height + 2,
+        preview_border = _BORDER_FULL,
     }
 end
 
@@ -122,58 +158,53 @@ function M.get_vertical_layout(opts)
     local row = math.floor((lines - total_height - _BORDER_SPAN) / 2)
     local col = math.floor((cols - width - _BORDER_SPAN) / 2)
 
-    -- layout (top to bottom): prompt, gap, list, gap, preview (optional)
+    -- Layout (top to bottom): the shared prompt/list frame, then -- when there is
+    -- one -- the preview directly below it, its top border on the row after the
+    -- frame's bottom one. Flush, like the preview beside the frame in the
+    -- horizontal layout.
+    local list_row = row + _PROMPT_ROWS
 
-    local prompt_height = 1
-    local gap = 2
-
-    if not has_preview then
-        local list_row = row + prompt_height + gap
-        local list_height = total_height - prompt_height - gap
-
-        return {
-            prompt_row = row,
-            prompt_col = col,
-            prompt_width = width,
-            prompt_height = prompt_height,
-
-            list_row = list_row,
-            list_col = col,
-            list_width = width,
-            list_height = list_height,
-
-            preview_row = list_row,
-            preview_col = col,
-            preview_width = 0,
-            preview_height = 0,
-        }
-    end
-
-    local usable_height = total_height - prompt_height - (gap * 2)
-
-    -- Even split, the odd row going to the list.
-    local list_height = math.max(1, math.ceil(usable_height / 2))
-    local preview_height = math.max(1, usable_height - list_height)
-
-    local list_row = row + prompt_height + gap
-    local preview_row = list_row + list_height + gap
-
-    return {
+    ---@type ezpick.Picker.Layout
+    local layout = {
         prompt_row = row,
         prompt_col = col,
         prompt_width = width,
-        prompt_height = prompt_height,
+        prompt_height = 1,
+        prompt_border = _BORDER_TOP,
 
         list_row = list_row,
         list_col = col,
         list_width = width,
-        list_height = list_height,
+        list_height = 1,
+        list_border = _BORDER_BOTTOM,
 
-        preview_row = preview_row,
+        preview_row = list_row,
         preview_col = col,
-        preview_width = width,
-        preview_height = preview_height,
+        preview_width = 0,
+        preview_height = 0,
+        preview_border = _BORDER_FULL,
     }
+
+    if not has_preview then
+        -- The prompt line and the rule under it; the frame's outer border is the
+        -- ring `_BORDER_SPAN` already pays for.
+        layout.list_height = math.max(1, total_height - 2)
+        return layout
+    end
+
+    -- Two rows for the prompt and its rule, and two more for the borders the
+    -- frame and the preview meet on.
+    local usable_height = math.max(2, total_height - 4)
+
+    -- Even split, the odd row going to the list.
+    local list_height = math.max(1, math.ceil(usable_height / 2))
+    layout.list_height = list_height
+    -- One past the frame's bottom border, which sits on `list_row + list_height`.
+    layout.preview_row = list_row + list_height + 1
+    layout.preview_width = width
+    layout.preview_height = math.max(1, usable_height - list_height)
+
+    return layout
 end
 
 ---@type table<ezpick.Picker.LayoutKind, fun(opts:table):ezpick.Picker.Layout>
