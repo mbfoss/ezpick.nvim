@@ -380,7 +380,6 @@ end
 ---@field _query_hint string? -- message of the query hint currently shown in the prompt
 ---@field _hint_col integer? -- prompt cursor column the shown hints were chosen for
 ---@field _spinner_frame string? -- spinner frame currently drawn on the prompt line, nil when idle
----@field _spinner_stop_cancel function? -- cancels the pending anti-flicker stop, nil when none is armed
 ---@field _prompt_wrapped integer -- screen lines the prompt took when the picker was last laid out
 ---@field _in_relayout boolean? -- set while `relayout` runs, to keep the renderers it calls from calling it back
 local Picker = {}
@@ -420,7 +419,6 @@ function Picker:init(opts, callback)
 
 	self.spinner               = nil
 	self._spinner_frame        = nil
-	self._spinner_stop_cancel  = nil
 
 	self.query_text            = ""
 
@@ -1129,17 +1127,7 @@ function Picker:update_preview()
 	)
 end
 
----Delay before a stop actually takes effect, so back-to-back fetches keep one
----continuous spinner instead of blinking it off and on.
-local _SPINNER_STOP_DELAY = 200
-
 function Picker:start_spinner()
-	-- A stop was armed but the next fetch beat it: keep the running spinner.
-	if self._spinner_stop_cancel then
-		self._spinner_stop_cancel()
-		self._spinner_stop_cancel = nil
-	end
-
 	if self.spinner then return end
 
 	self.spinner = Spinner:new {
@@ -1153,24 +1141,7 @@ function Picker:start_spinner()
 	self.spinner:start()
 end
 
----Stop the spinner. Deferred by `_SPINNER_STOP_DELAY` unless `immediate`, so a
----fetch that starts right after this one does not make the spinner flicker.
----@param immediate boolean? Stop now, skipping the anti-flicker delay.
-function Picker:stop_spinner(immediate)
-	if self._spinner_stop_cancel then
-		self._spinner_stop_cancel()
-		self._spinner_stop_cancel = nil
-	end
-
-	if not immediate then
-		if not self.spinner then return end
-		self._spinner_stop_cancel = timer.defer(_SPINNER_STOP_DELAY, function()
-			self._spinner_stop_cancel = nil
-			if not self.closed then self:stop_spinner(true) end
-		end)
-		return
-	end
-
+function Picker:stop_spinner()
 	if self.spinner then
 		self.spinner:stop()
 		self.spinner = nil
@@ -1387,7 +1358,7 @@ function Picker:run_fetch()
 		function(new_items)
 			if complete or self.closed or context ~= self.async_fetch_context then return end
 			complete = true
-			self:stop_spinner(true)
+			self:stop_spinner()
 			if new_items and #new_items > 0 then
 				new_items = _rank_items(new_items)
 				local target_row = 1
@@ -1507,7 +1478,7 @@ function Picker:close(selected_data)
 	if self.pwin_augroup then pcall(vim.api.nvim_del_augroup_by_id, self.pwin_augroup) end
 	self.pwin_augroup = nil
 
-	self:stop_spinner(true)
+	self:stop_spinner()
 
 	self.preview_timer = timer.stop_and_close_timer(self.preview_timer)
 
