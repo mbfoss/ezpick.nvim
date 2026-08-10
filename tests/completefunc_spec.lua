@@ -144,14 +144,20 @@ describe("picker query hints", function()
             vim.wait(50)
         end
 
-        -- The position counter shares this corner, so match on the hint's own
-        -- highlight rather than on being virtual text.
+        -- The hint gets a virtual line under the query; the position counter is
+        -- virtual text right-aligned on the query's own line.
         local hint
         local marked = 0
         local counted = false
         for _, m in ipairs(vim.api.nvim_buf_get_extmarks(pbuf, -1, 0, -1, { details = true })) do
             local vt = m[4] and m[4].virt_text
-            if vt and vt[1][2] == "DiagnosticVirtualTextWarn" then hint = vim.trim(vt[1][1]) end
+            -- A rule is drawn above the words, so the message is the chunk
+            -- carrying the hint's own highlight rather than the first one.
+            for _, vline in ipairs(m[4] and m[4].virt_lines or {}) do
+                for _, chunk in ipairs(vline) do
+                    if chunk[2] == "DiagnosticVirtualTextWarn" then hint = vim.trim(chunk[1]) end
+                end
+            end
             if vt and vt[1][2] == "NonText" then counted = true end
             if m[4] and m[4].hl_group == "DiagnosticUnderlineWarn" then marked = marked + 1 end
         end

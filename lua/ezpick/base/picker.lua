@@ -108,6 +108,11 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---
 ---`parse` reports everything it can see and holds nothing back, having no cursor
 ---to hold it against; this table and `_at_cursor` are the whole of that judgment.
+---Marks the line under the query as a remark about the query rather than more of
+---it. The trailing space is part of it: the two run together otherwise.
+---@type string
+local _HINT_ICON = "⚠ "
+
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
 	["missing-value"]  = true,
@@ -374,6 +379,8 @@ end
 ---@field _hint_col integer? -- prompt cursor column the shown hints were chosen for
 ---@field _list_sep_line string
 ---@field _show_list_sep boolean
+---@field _prompt_wrapped integer -- screen lines the prompt took when the picker was last laid out
+---@field _in_relayout boolean? -- set while `relayout` runs, to keep the renderers it calls from calling it back
 local Picker = {}
 Picker.__index = Picker
 
@@ -401,6 +408,8 @@ function Picker:init(opts, callback)
 	-- item carries a virtual line, so the extra line reads as part of its entry.
 	self._show_list_sep        = false
 	self._list_sep_line        = ""
+
+	self._prompt_wrapped       = 1
 
 	self.closed                = false
 
@@ -468,6 +477,12 @@ function Picker:apply_prompt()
 		vim.api.nvim_buf_set_lines(self.pbuf, 0, -1, false, { text })
 		vim.api.nvim_win_set_cursor(self.pwin, { 1, math.min(col, #text) })
 	end
+
+	-- Before the fetch: the query just typed may have wrapped onto another line,
+	-- and the list is laid out again to make room for it. `render_prompt_highlight`
+	-- syncs too, but it only runs when the query itself changed -- a line edited
+	-- back to the same query can still have been rewrapped by the edit.
+	self:_sync_prompt_height()
 
 	if text ~= self.query_text then
 		self.query_text = text
@@ -557,10 +572,46 @@ function Picker:_apply_wrap_indent()
 	end
 end
 
+---Screen lines the query takes, wrapped to the prompt's current width. Neovim
+---counts them: `nvim_win_text_height` measures the buffer as the window would
+---draw it, wrapping, tabs, double-width characters and all.
+---
+---What it does not count is the cursor, which in insert mode sits one cell past
+---the query -- on the row after, when the query fills its last row exactly. That
+---row is the one being typed into, so the prompt is given it.
+---@return integer
+function Picker:_prompt_text_height()
+	if not self.pwin or not vim.api.nvim_win_is_valid(self.pwin) then return 1 end
+	local height = vim.api.nvim_win_text_height(self.pwin, {}).all
+	local width = vim.api.nvim_win_get_width(self.pwin)
+	local line = vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or ""
+	local last = vim.fn.strdisplaywidth(line) % width
+	return height + (last == 0 and line ~= "" and 1 or 0)
+end
+
+---Re-lay the picker out when the query has grown or shrunk by a wrapped line.
+---Called from wherever the prompt text changes; a query that still wraps the
+---same way costs nothing but the measurement.
+---@return nil
+function Picker:_sync_prompt_height()
+	if self.closed or not self.layout then return end
+	-- `relayout` renders the list again on its way through, and rendering is what
+	-- calls this: the measurement it would take is of a prompt half moved.
+	if self._in_relayout then return end
+	-- `relayout` dismisses the completion menu to move the floats out from under
+	-- it. Growing the prompt is not worth that mid-completion; `CompleteDone`
+	-- runs `apply_prompt` and the resize lands then.
+	if vim.fn.pumvisible() == 1 then return end
+	if self:_prompt_text_height() ~= self._prompt_wrapped then
+		self:relayout()
+	end
+end
+
 ---Build the floats for the current editor size, creating whatever is not up yet
 ---and moving whatever is.
 function Picker:relayout()
 	if self.closed then return end
+	self._in_relayout = true
 	local opts = self.opts
 	local title = opts.prompt and (" " .. opts.prompt .. " ") or ""
 
@@ -570,13 +621,21 @@ function Picker:relayout()
 		)
 	end
 
-	self.layout = layouts.build(self.opts.layout, {
-		has_preview = self.preview_enabled,
-		height_ratio = self.opts.height_ratio,
-		width_ratio = self.opts.width_ratio,
-	})
+	---@param prompt_height integer
+	---@return ezpick.Picker.Layout
+	local function build(prompt_height)
+		return layouts.build(self.opts.layout, {
+			has_preview = self.preview_enabled,
+			height_ratio = self.opts.height_ratio,
+			width_ratio = self.opts.width_ratio,
+			prompt_height = prompt_height,
+		})
+	end
 
-	self._list_sep_line = string.rep("─", self.layout.list_width)
+	-- The wrapped query is measured off the prompt window, so the layout starts
+	-- from the height the prompt has now and is settled below, once the window
+	-- has been moved to the width this one gives it.
+	self.layout = build(self.layout and self.layout.prompt_height or 1)
 
 	-- The border is per float and comes from the layout: the prompt and the list
 	-- share one frame, each drawing the half of it that is theirs.
@@ -586,6 +645,19 @@ function Picker:relayout()
 	}
 
 	local winhl = _WINHL
+
+	---@return table
+	local function prompt_cfg()
+		return vim.tbl_extend("force", base_cfg, {
+			row = self.layout.prompt_row,
+			col = self.layout.prompt_col,
+			width = self.layout.prompt_width,
+			height = self.layout.prompt_height,
+			border = self.layout.prompt_border,
+			title = title,
+			title_pos = "center",
+		})
+	end
 
 	if not self.pwin then
 		if not self.pbuf then
@@ -597,15 +669,7 @@ function Picker:relayout()
 			end)
 		end
 		local pwin_augroup
-		self.pwin, pwin_augroup = ui.create_window(self.pbuf, true, vim.tbl_extend("force", base_cfg, {
-				row = self.layout.prompt_row,
-				col = self.layout.prompt_col,
-				width = self.layout.prompt_width,
-				height = 1,
-				border = self.layout.prompt_border,
-				title = title,
-				title_pos = "center"
-			}),
+		self.pwin, pwin_augroup = ui.create_window(self.pbuf, true, prompt_cfg(),
 			function()
 				self.pwin = nil
 				if not self.closed then
@@ -613,7 +677,10 @@ function Picker:relayout()
 				end
 			end)
 		vim.wo[self.pwin].winhighlight = winhl
-		vim.wo[self.pwin].wrap = false
+		-- A query longer than the frame is wrapped rather than scrolled sideways:
+		-- the float grows a line at a time to hold it, up to the even split with
+		-- the list that `layouts` caps it at.
+		vim.wo[self.pwin].wrap = true
 
 		assert(type(pwin_augroup) == "number")
 		self.pwin_augroup = pwin_augroup
@@ -641,16 +708,25 @@ function Picker:relayout()
 			end
 		})
 	else
-		vim.api.nvim_win_set_config(self.pwin, vim.tbl_extend("force", base_cfg, {
-			row = self.layout.prompt_row,
-			col = self.layout.prompt_col,
-			width = self.layout.prompt_width,
-			height = 1,
-			border = self.layout.prompt_border,
-			title = title,
-			title_pos = "center",
-		}))
+		vim.api.nvim_win_set_config(self.pwin, prompt_cfg())
 	end
+
+	-- The prompt is where it will be and as wide as it will be, so what the query
+	-- wraps to can be measured. Only its height is still open, and only the rows
+	-- under it -- the list's -- answer to it; the widths and the preview do not,
+	-- so nothing already decided above has to be revisited.
+	local wrapped = self:_prompt_text_height()
+	if wrapped ~= self.layout.prompt_height then
+		self.layout = build(wrapped)
+		vim.api.nvim_win_set_config(self.pwin, prompt_cfg())
+	end
+	-- What was measured, not what the layout granted: past the even split the
+	-- prompt stops growing, and the two part company. Comparing against the
+	-- measurement is what keeps a query that goes on growing from asking for a
+	-- relayout on every keystroke.
+	self._prompt_wrapped = wrapped
+
+	self._list_sep_line = string.rep("─", self.layout.list_width)
 
 	if not self.lwin then
 		if not self.lbuf then
@@ -740,9 +816,48 @@ function Picker:relayout()
 		end
 		self:update_preview()
 	end
+
+	self._in_relayout = false
 end
 
+---Show `msg` under the query, along the prompt's right edge.
+---
+---A virtual line rather than `eol_right_align` virtual text: aligning to the
+---right edge pins the message to whatever screen row the query happens to end
+---on, and a query long enough to reach it slides underneath and takes the
+---corner. A virtual line is a screen row of its own, so the query cannot reach
+---it -- and `nvim_win_text_height` counts it, so the prompt grows a row to hold
+---it instead of pushing the query out of sight.
+---
+---Virtual lines are not wrapped ('wrap' does not reach them), and one wider than
+---the prompt is cut off at the right -- so a message too long for the prompt
+---loses its tail rather than its opening words. `virt_lines_overflow` says as
+---much explicitly.
+---@param ns integer Namespace, cleared by the caller.
+---@param msg string
+---@param hl string
+---@param priority integer
+---@return nil
+function Picker:_set_prompt_hint(ns, msg, hl, priority)
+	vim.api.nvim_buf_set_extmark(self.pbuf, ns, 0, 0, {
+		virt_lines          = { { { _HINT_ICON .. msg, hl } } },
+		virt_lines_overflow = "trunc",
+		priority            = priority,
+	})
+end
+
+---Flag highlights, and the hint about the first mistake among them, for `query`.
+---@param query string
+---@return nil
 function Picker:render_prompt_highlight(query)
+	self:_render_prompt_marks(query)
+	-- A hint is a virtual line, and the prompt has to find it a row.
+	self:_sync_prompt_height()
+end
+
+---@param query string
+---@return nil
+function Picker:_render_prompt_marks(query)
 	if not self.pbuf then return end
 	vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_CONTENT, 0, -1)
 	self._query_hint = nil
@@ -789,12 +904,7 @@ function Picker:render_prompt_highlight(query)
 
 	-- Only the first gets words; the prompt line is not a diagnostics window.
 	self._query_hint = shown[1].msg
-	vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, 0, {
-		virt_text     = { { " " .. shown[1].msg, "DiagnosticVirtualTextWarn" } },
-		virt_text_pos = "eol_right_align",
-		hl_mode       = "blend",
-		priority      = 100,
-	})
+	self:_set_prompt_hint(_NS_CONTENT, shown[1].msg, "DiagnosticVirtualTextWarn", 100)
 end
 
 function Picker:render_position()
@@ -805,7 +915,10 @@ function Picker:render_position()
 	local total = #self.list_items
 	if total == 0 then return end
 	local cur = self:get_cursor() or 1
-	local text = string.format("%d/%d", cur, total)
+	local text = string.format(" %d/%d", cur, total)
+	-- Right-aligned rather than on a line of its own like the hints: the counter
+	-- is on screen the whole time, and a row spent on it is a row the list does
+	-- not get. A query long enough to reach the corner takes it.
 	vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CURSOR, 0, 0, {
 		virt_text = { { text, "NonText" } },
 		virt_text_pos = "eol_right_align",
@@ -1003,7 +1116,7 @@ function Picker:start_spinner()
 			if not self.pbuf then return end
 			vim.api.nvim_buf_clear_namespace(self.pbuf, _NS_SPINNER, 0, -1)
 			vim.api.nvim_buf_set_extmark(self.pbuf, _NS_SPINNER, 0, 0, {
-				virt_text = { { frame .. " ", "NonText" } },
+				virt_text = { { " " .. frame, "NonText" } },
 				virt_text_pos = "eol_right_align",
 				priority = 1,
 			})

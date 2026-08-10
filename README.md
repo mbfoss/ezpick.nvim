@@ -164,9 +164,13 @@ query starting with a flag name.
 
 Mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, an
 unfinished quote or a flag written after the query gets an underline and a short
-hint in the prompt, while the search keeps running on a best-effort reading. A
+hint under the prompt, while the search keeps running on a best-effort reading. A
 hint about the flag the cursor is still inside waits until the cursor moves on,
 so writing one out correctly is silent.
+
+A query too long for one line wraps rather than scrolling out of sight, and the
+prompt grows a row at a time to hold it — taking the rows from the list, up to an
+even split with it.
 
 `files` accepts `--dir`, `--case`, `--mode` (`fuzzy`|`fixed`|`glob`),
 `--follow`, `--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,

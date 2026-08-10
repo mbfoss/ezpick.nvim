@@ -63,7 +63,10 @@ tests/                   plenary busted specs
   reported, including the half-written states a correct flag passes through:
   telling those apart takes the cursor, so the picker is where a hint is held
   back until the cursor leaves what it points at.
-- **`layouts.lua`** — geometry for the list/preview floats.
+- **`layouts.lua`** — geometry for the list/preview floats. The prompt's height is
+  an input: the picker measures what the query wraps to with
+  `nvim_win_text_height` and asks for that many rows, which `_split_frame` grants
+  out of the list's share, never past an even split with it.
 
 ### Sources
 
