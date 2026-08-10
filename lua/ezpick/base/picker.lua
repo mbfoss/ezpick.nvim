@@ -377,8 +377,6 @@ end
 ---@field _suppress_autocomplete boolean?
 ---@field _query_hint string? -- message of the query hint currently shown in the prompt
 ---@field _hint_col integer? -- prompt cursor column the shown hints were chosen for
----@field _list_sep_line string
----@field _show_list_sep boolean
 ---@field _prompt_wrapped integer -- screen lines the prompt took when the picker was last laid out
 ---@field _in_relayout boolean? -- set while `relayout` runs, to keep the renderers it calls from calling it back
 local Picker = {}
@@ -403,11 +401,6 @@ function Picker:init(opts, callback)
 	self.preview_enabled       = opts.enable_preview == true
 
 	self.list_items            = {} ---@type ezpick.picker.ListItem[]
-
-	-- Separators are not a user option: they switch on by themselves as soon as an
-	-- item carries a virtual line, so the extra line reads as part of its entry.
-	self._show_list_sep        = false
-	self._list_sep_line        = ""
 
 	self._prompt_wrapped       = 1
 
@@ -560,12 +553,11 @@ function Picker:setup_ui()
 end
 
 ---Indent wrapped list lines so continuations are visually distinct from new
----entries. Separators already delimit items, so no indent is needed while they
----are shown.
+---entries.
 ---@return nil
 function Picker:_apply_wrap_indent()
 	if not self.lwin or not vim.api.nvim_win_is_valid(self.lwin) then return end
-	local indent = self.opts.list_wrap_indent or (self._show_list_sep and 0 or 2)
+	local indent = self.opts.list_wrap_indent or 2
 	vim.wo[self.lwin].breakindent = indent > 0
 	if indent > 0 then
 		vim.wo[self.lwin].breakindentopt = "shift:" .. indent
@@ -725,8 +717,6 @@ function Picker:relayout()
 	-- measurement is what keeps a query that goes on growing from asking for a
 	-- relayout on every keystroke.
 	self._prompt_wrapped = wrapped
-
-	self._list_sep_line = string.rep("─", self.layout.list_width)
 
 	if not self.lwin then
 		if not self.lbuf then
@@ -1177,7 +1167,6 @@ end
 
 function Picker:clear_list()
 	self.list_items = {}
-	self._show_list_sep = false
 	self:_apply_wrap_indent()
 	if not self.lbuf then return end
 
@@ -1202,15 +1191,6 @@ function Picker:set_items(items)
 	local prefix = "  "
 	local count  = #items
 
-	-- A separator is what keeps a virtual line attached to its own entry, so it
-	-- turns on for the whole list as soon as any item carries one.
-	self._show_list_sep = false
-	for _, item in ipairs(items) do
-		if item.virt_line and #item.virt_line > 0 then
-			self._show_list_sep = true
-			break
-		end
-	end
 	self:_apply_wrap_indent()
 
 	local list_items = tbl_new(count, 0) ---@type ezpick.picker.ListItem[]
@@ -1274,15 +1254,10 @@ function Picker:set_items(items)
 
 		local vlines
 		if item.virt_line and #item.virt_line > 0 then
-			local vl = { { prefix } }
+			local vl = { { prefix }, {"╰─ ", "NonText"} }
 			vim.list_extend(vl, item.virt_line)
 			vlines = { vl }
 		end
-		if self._show_list_sep then
-			vlines = vlines or {}
-			vlines[#vlines + 1] = { { self._list_sep_line, "NonText" } }
-		end
-
 		if vlines then
 			vim.api.nvim_buf_set_extmark(self.lbuf, _NS_CONTENT, row, 0, {
 				virt_lines = vlines,

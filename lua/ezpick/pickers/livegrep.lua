@@ -78,6 +78,30 @@ local function build_chunks(text, subs, show_repl)
     return chunks
 end
 
+--- Strip surrounding whitespace for display, shifting the submatch offsets to
+--- match. Trimming never eats into a submatch (a query can match whitespace),
+--- so the highlighted spans stay exact. Display only — `data.subs` keeps the
+--- original offsets, which replace-all applies to the untrimmed buffer line.
+---@param text string
+---@param subs ezpick.rgutil.Submatch[]
+---@return string text, ezpick.rgutil.Submatch[] subs
+local function trim_for_display(text, subs)
+    local first = text:match("^%s*")
+    local lead  = #first
+    local tail  = #text - #(text:match("%s*$"))
+    for _, sm in ipairs(subs) do
+        if sm.s < lead then lead = sm.s end
+        if sm.e > tail then tail = sm.e end
+    end
+    if lead == 0 and tail == #text then return text, subs end
+
+    local shifted = {}
+    for i, sm in ipairs(subs) do
+        shifted[i] = { s = sm.s - lead, e = sm.e - lead, repl = sm.repl }
+    end
+    return text:sub(lead + 1, tail), shifted
+end
+
 ---@param text string
 ---@param subs ezpick.rgutil.Submatch[]
 ---@return string
@@ -394,8 +418,9 @@ local function make_item(m, abs_path, cwd, list_width, show_repl, rel_path, from
         virt_line[#virt_line + 1] = { _BUFFER_INDICATOR, "EzPickBufferIndicator" }
     end
     virt_line[#virt_line + 1] = { location, "EzPickPath" }
+    local shown_text, shown_subs = trim_for_display(m.text, m.subs)
     return {
-        label_chunks = build_chunks(m.text, m.subs, show_repl),
+        label_chunks = build_chunks(shown_text, shown_subs, show_repl),
         virt_line    = virt_line,
         data         = { filepath = abs_path, lnum = m.lnum, col = m.col, subs = m.subs },
     }

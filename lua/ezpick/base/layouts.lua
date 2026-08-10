@@ -24,16 +24,8 @@ local _FALLBACK = { width_ratio = 0.6, height_ratio = 0.7 }
 ---has to allow for it or the picker sits two cells low and two cells right.
 local _BORDER_SPAN = 2
 
----Helix-style framing: the prompt and the list are one box. The prompt draws
----the top, the sides and the rule dividing the query from the items; the list
----draws its sides and the bottom, and nothing of its own where the rule already
----is -- so the two floats read as a single frame. Border order is
----{tl, t, tr, r, br, b, bl, l}; an empty string means no border there, and no
----row or column reserved for it.
----The rule takes its own highlight, a `{char, hl}` pair where the rest of the
----border is a plain string on `FloatBorder`: it divides the frame rather than
----bounding it, so it reads better dimmed.
-local _BORDER_TOP = { "╭", "─", "╮", "│", "│", { "─", "NonText" }, "│", "│" }
+---Helix-style framing
+local _BORDER_TOP    = { "╭", "─", "╮", "│", "│", { "─", "NonText" }, "│", "│" }
 local _BORDER_BOTTOM = { "", "", "", "│", "╯", "─", "╰", "│" }
 local _BORDER_FULL = "rounded"
 
