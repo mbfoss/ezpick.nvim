@@ -202,7 +202,7 @@ describe("picker query hints", function()
         -- to be reason enough to look again. Waiting on the next keystroke never
         -- comes for the line that is finished except for the mistake in it.
         assert.is_truthy(select(3, type_query("--case sm", nil, 0)):find("smart|on|off", 1, true))
-        assert.is_truthy(select(3, type_query("--hiddn", nil, 0)):find("--hidden", 1, true))
+        assert.is_truthy(select(3, type_query("--hiddn", nil, 0)):find("unknown option --hiddn", 1, true))
         assert.is_truthy(select(3, type_query("--dir", nil, 0)):find("needs a value", 1, true))
     end)
 
@@ -215,10 +215,10 @@ describe("picker query hints", function()
         assert.is_true(counted)
     end)
 
-    it("searches for a typo'd flag and suggests the real one", function()
+    it("searches for a typo'd flag and flags it as unknown", function()
         local query, _, hint = type_query("--hiddn x")
         assert.are.equal("--hiddn x", query)
-        assert.is_truthy(hint:find("--hidden", 1, true))
+        assert.is_truthy(hint:find("unknown option --hiddn", 1, true))
     end)
 
     it("leaves a flag written after the query entirely alone", function()

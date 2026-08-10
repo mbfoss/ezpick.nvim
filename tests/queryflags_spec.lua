@@ -297,10 +297,10 @@ describe("queryflags hints", function()
         assert.is_not_nil(hint_of(r, "unclosed-quote"))
     end)
 
-    it("suggests the flag a typo was reaching for", function()
+    it("reports a typo'd flag as unknown", function()
         local h = hint_of(qf.parse(schema, "--fixd hello"), "unknown-flag")
         assert.is_not_nil(h)
-        assert.is_truthy(h.msg:find("--fixed", 1, true))
+        assert.is_truthy(h.msg:find("unknown option --fixd", 1, true))
         -- ... and the typo is still searched for rather than swallowed
         assert.are.equal("--fixd hello", qf.parse(schema, "--fixd hello").query)
     end)
@@ -414,8 +414,7 @@ describe("queryflags hints", function()
         assert.are.equal("--ci: on|off", msg("--ci bogus x", "bad-value"))
         assert.are.equal("--F takes no value", msg("--F=x y", "unexpected-value"))
         assert.is_truthy(msg("--dir a --dir b", "duplicate-flag"):find("--dir set 2 times", 1, true))
-        -- ... and a typo is pointed at the spelling it was reaching for
-        assert.is_truthy(msg("--di x", "unknown-flag"):find("try --dir", 1, true))
+        assert.are.equal("unknown option --di", msg("--di x", "unknown-flag"))
     end)
 
     it("does not police a non-strict flag's values", function()

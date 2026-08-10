@@ -140,59 +140,6 @@ local function _build_map(schema)
     return m
 end
 
----@param a string
----@param b string
----@return integer
-local function _edit_distance(a, b)
-    local prev = {}
-    for j = 0, #b do prev[j] = j end
-    for i = 1, #a do
-        local cur = { [0] = i }
-        for j = 1, #b do
-            local cost = a:sub(i, i) == b:sub(j, j) and 0 or 1
-            cur[j] = math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
-        end
-        prev = cur
-    end
-    return prev[#b]
-end
-
----The flag a misspelling was probably reaching for: a name it is a prefix of,
----or failing that the nearest one within a couple of typos. Aliases are
----candidates too, and the spelling that matched is the one suggested --- it is
----the name being reached for, and it works exactly as well as the canonical one.
----@param schema ezpick.queryflags.FlagDef[]
----@param typed  string
----@return string?
-local function _did_you_mean(schema, typed)
-    local key = _key(typed)
-    if key == "" then return nil end
-
-    local best, best_dist
-
-    ---@param name string
-    local function consider(name)
-        local cand = _key(name)
-        local dist
-        if vim.startswith(cand, key) then
-            dist = 0
-        else
-            dist = _edit_distance(key, cand)
-            if dist > math.min(2, #key) then dist = nil end
-        end
-        if dist and (not best_dist or dist < best_dist) then
-            best, best_dist = name, dist
-        end
-    end
-
-    for _, def in ipairs(schema) do
-        consider(def.name)
-        for _, alias in ipairs(def.alias or {}) do consider(alias) end
-    end
-
-    return best
-end
-
 ---A "--name" at `i`, if one is written there. Returns nil for a bare "--" and
 ---for anything that is not dashed, so the caller can tell the three apart.
 ---@param str string
@@ -268,9 +215,8 @@ end
 ---Walk the flagged prefix of `str`, stopping at the query.
 ---@param str    string
 ---@param defs   table<string, ezpick.queryflags.FlagDef>
----@param schema ezpick.queryflags.FlagDef[]
 ---@return ezpick.queryflags.Piece[] pieces, integer query_start, ezpick.queryflags.Hint[] hints, ezpick.queryflags.FlagDef? pending
-local function _scan(str, defs, schema)
+local function _scan(str, defs)
     local pieces  = {}
     local hints   = {}
     local len     = #str
@@ -323,11 +269,7 @@ local function _scan(str, defs, schema)
             -- tells those two apart, and the consumer is the one holding it.
             if name then
                 assert(name_end)
-                local suggestion = _did_you_mean(schema, name)
-                hint("unknown-flag", tok_start, name_end,
-                    suggestion
-                    and ("unknown %s%s, try %s%s"):format(_PREFIX, name, _PREFIX, suggestion)
-                    or ("unknown %s%s"):format(_PREFIX, name))
+                hint("unknown-flag", tok_start, name_end, ("unknown option %s%s"):format(_PREFIX, name))
             end
             return pieces, tok_start, hints, nil
         end
@@ -401,7 +343,7 @@ end
 function M.parse(schema, raw)
     local defs                         = _build_map(schema)
     local flags                        = {}
-    local pieces, query_start, hints   = _scan(raw, defs, schema)
+    local pieces, query_start, hints   = _scan(raw, defs)
     ---Name spans of every occurrence of each single-valued flag, left to right.
     ---@type table<string, {start:integer, finish:integer, typed:string}[]>
     local occurrences                  = {}
@@ -510,7 +452,7 @@ end
 function M.highlight(schema, raw)
     local defs        = _build_map(schema)
     local hls         = {}
-    local pieces      = _scan(raw, defs, schema)
+    local pieces      = _scan(raw, defs)
 
     for _, piece in ipairs(pieces) do
         local s0 = piece.start - 1
@@ -632,7 +574,7 @@ function M.get_completions(schema, line, cursor_byte, auto)
 
     local defs                            = _build_map(schema)
     local before                          = line:sub(1, cursor_byte)
-    local pieces, query_start, _, pending = _scan(before, defs, schema)
+    local pieces, query_start, _, pending = _scan(before, defs)
     local last                            = pieces[#pieces]
 
     -- Case 1: on the value of a value flag -- either typing it, or sitting in
