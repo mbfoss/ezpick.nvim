@@ -737,11 +737,21 @@ function Picker:render_prompt_highlight(query)
 	self._query_hint = nil
 	if #self.opts.flags == 0 then return end
 
+	-- Spans are measured against `query`, but the extmarks land on the prompt
+	-- line as it is right now. Insert-mode completion changes that line without
+	-- a TextChangedI, so the two can disagree; clamping keeps a stale span from
+	-- erroring out of range instead of just highlighting a little too much.
+	local line = #(vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "")
+
 	for _, h in ipairs(queryflags.highlight(self.opts.flags, query)) do
-		vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, h.start, {
-			end_col  = h.finish,
-			hl_group = h.hl,
-		})
+		local start = math.min(h.start, line)
+		local finish = math.min(h.finish, line)
+		if start < finish then
+			vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, start, {
+				end_col  = finish,
+				hl_group = h.hl,
+			})
+		end
 	end
 
 	-- A hint about the span the cursor is still inside is a hint about
@@ -759,8 +769,8 @@ function Picker:render_prompt_highlight(query)
 	if #shown == 0 then return end
 
 	for _, hint in ipairs(shown) do
-		vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, math.min(hint.start, #query), {
-			end_col  = math.min(hint.finish, #query),
+		vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, math.min(hint.start, line), {
+			end_col  = math.min(hint.finish, line),
 			hl_group = "DiagnosticUnderlineWarn",
 			priority = 200,
 		})
@@ -1482,7 +1492,9 @@ function Picker:setup_input()
 					-- Typing moves the cursor too, and the text path has just
 					-- drawn these same hints for this same column.
 					if vim.api.nvim_win_get_cursor(self.pwin)[2] == self._hint_col then return end
-					self:render_prompt_highlight(self.query_text)
+					-- Not query_text: completion rewrites the line without a
+					-- TextChangedI, so the cached query can lag behind it.
+					self:render_prompt_highlight(vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "")
 					self:render_position()
 				end
 			})
