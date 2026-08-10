@@ -75,7 +75,6 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field width_ratio number? Fraction of the editor the whole picker spans.
 ---@field height_ratio number?
 ---@field list_wrap boolean?
----@field list_wrap_indent number? Spaces to indent wrapped list lines. Defaults to 0 while separators are shown, else 2.
 ---@field initial_query  string?
 ---@field initial_cursor (integer|fun(items:ezpick.Picker.Item[]):integer?)? Row to select on the first populated fetch, as a 1-based index into the ranked list or a function that finds one. Spent by that fetch; later queries start at the top.
 ---@field auto_complete_flags boolean? Auto-open flag completion while typing (default true).
@@ -323,6 +322,10 @@ local function _rank_items(items)
 	return items
 end
 
+---Every list label is written behind this prefix, which leaves the room the
+---cursor marker is drawn in.
+local _LIST_PREFIX = "  "
+
 ---A label occupies one buffer line, and `nvim_buf_set_lines` refuses a string
 ---with a newline in it. The swap is byte for byte, so the byte columns the
 ---highlight chunks are placed at are unaffected by it.
@@ -553,15 +556,12 @@ function Picker:setup_ui()
 end
 
 ---Indent wrapped list lines so continuations are visually distinct from new
----entries.
+---entries: a continuation lines up under the label above it rather than under
+---the prefix that label starts past.
 ---@return nil
 function Picker:_apply_wrap_indent()
 	if not self.lwin or not vim.api.nvim_win_is_valid(self.lwin) then return end
-	local indent = self.opts.list_wrap_indent or 2
-	vim.wo[self.lwin].breakindent = indent > 0
-	if indent > 0 then
-		vim.wo[self.lwin].breakindentopt = "shift:" .. indent
-	end
+	vim.wo[self.lwin].breakindent = true
 end
 
 ---Screen lines the query takes, wrapped to the prompt's current width. Neovim
@@ -1167,7 +1167,6 @@ end
 
 function Picker:clear_list()
 	self.list_items = {}
-	self:_apply_wrap_indent()
 	if not self.lbuf then return end
 
 	vim.bo[self.lbuf].modifiable = true
@@ -1188,10 +1187,8 @@ function Picker:set_items(items)
 	items = items or {}
 	if not self.lbuf then return end
 
-	local prefix = "  "
+	local prefix = _LIST_PREFIX
 	local count  = #items
-
-	self:_apply_wrap_indent()
 
 	local list_items = tbl_new(count, 0) ---@type ezpick.picker.ListItem[]
 	local lines      = tbl_new(count, 0) ---@type string[]
