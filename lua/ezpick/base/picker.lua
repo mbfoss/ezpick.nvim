@@ -1124,18 +1124,27 @@ function Picker:update_preview()
 end
 
 function Picker:start_spinner()
-	if self.spinner then return end
-	self.spinner = Spinner:new {
-		interval = 100,
-		on_update = function(frame)
-			self._spinner_frame = frame
-			self:render_spinner()
+	if self.spinner or self._spinner_delay_timer then return end
+	self._spinner_delay_timer = vim.defer_fn(function()
+		self._spinner_delay_timer = nil
+		if not self.spinner then
+			self.spinner = Spinner:new {
+				interval = 100,
+				on_update = function(frame)
+					self._spinner_frame = frame
+					self:render_spinner()
+				end
+			}
+			self.spinner:start()
 		end
-	}
-	self.spinner:start()
+	end, _antiflicker_delay)
 end
 
 function Picker:stop_spinner()
+	if self._spinner_delay_timer then
+		self._spinner_delay_timer:close()
+		self._spinner_delay_timer = nil
+	end
 	if self.spinner then
 		self.spinner:stop()
 		self.spinner = nil
