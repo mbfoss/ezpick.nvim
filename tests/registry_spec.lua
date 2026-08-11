@@ -4,7 +4,7 @@ local registry = require("ezpick.registry")
 -- or a renamed spec builder only shows up when that source is first opened.
 -- Building every one of them here keeps that failure in the test suite instead.
 
-local FETCH_OPTS = { list_width = 60, list_height = 20 }
+local FETCH_OPTS = { line_width = 60, virt_line_width = 57, list_height = 20 }
 
 describe("registry", function()
     it("builds every registered source", function()

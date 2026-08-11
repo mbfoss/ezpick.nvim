@@ -23,11 +23,11 @@ local icons       = require("ezpick.icons")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
-    { name = "dir",    type = "value",   complete = "dir", desc = "override search root directory"    },
-    { name = "mode",   type = "value",   strict = true, values = { "fuzzy", "fixed", "glob" }, desc = "match: fuzzy (default) | fixed (literal substring) | glob (rg-style globs, space separated)" },
-    { name = "case",   type = "value",   strict = true, values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
-    { name = "follow", type = "boolean", desc = "follow symlinks"                   },
-    { name = "hidden", type = "boolean", desc = "include hidden (dotfiles)"         },
+    { name = "dir",    type = "value",   complete = "dir",                  desc = "override search root directory" },
+    { name = "mode",   type = "value",   strict = true,                     values = { "fuzzy", "fixed", "glob" },  desc = "match: fuzzy (default) | fixed (literal substring) | glob (rg-style globs, space separated)" },
+    { name = "case",   type = "value",   strict = true,                     values = { "smart", "on", "off" },      desc = "case: smart (default) | on | off" },
+    { name = "follow", type = "boolean", desc = "follow symlinks" },
+    { name = "hidden", type = "boolean", desc = "include hidden (dotfiles)" },
 }
 
 --- Resolve a `case` flag value into a case-sensitivity decision.
@@ -154,12 +154,12 @@ local function async_lua_search(query, opts, fetch_opts, callback)
     local base_excludes      = opts.show_hidden and {} or { ".*", "**/.*" }
     local exclude_regex_list = strutil.compile_globs(base_excludes)
 
-    local aborted = false
+    local aborted            = false
     local walk_cancel ---@type fun()?
     -- `on_file` cancels the walk once `max_results` is reached, which must hold
     -- even if a slice ever runs before `walk_cancel` is assigned: latch the
     -- request and apply it on return.
-    local cancel_requested = false
+    local cancel_requested   = false
     local function cancel_walk()
         cancel_requested = true
         if walk_cancel then walk_cancel() end
@@ -206,10 +206,10 @@ end
 function M.spec(opts)
     opts = opts or {}
     return {
-        prompt         = opts.prompt or "Files",
-        flags          = opts.cwd and vim.tbl_filter(function(f) return f.name ~= "dir" end, FLAGS) or FLAGS,
-        enable_preview = true,
-        finder         = function(query, flags, fetch_opts, callback)
+        prompt             = opts.prompt or "Files",
+        flags              = opts.cwd and vim.tbl_filter(function(f) return f.name ~= "dir" end, FLAGS) or FLAGS,
+        enable_preview     = true,
+        finder             = function(query, flags, fetch_opts, callback)
             if not query or query == "" then
                 callback()
                 return
@@ -232,7 +232,11 @@ function M.spec(opts)
             }
             return async_lua_search(query, search_opts, fetch_opts, callback)
         end,
-        on_confirm     = function(data)
+        quickfix_formatter = function(data)
+            ---@type vim.quickfix.entry
+            return { filename = data.filepath }
+        end,
+        on_confirm         = function(data)
             if data and data.filepath then ui.smart_open_file(data.filepath) end
         end,
     }

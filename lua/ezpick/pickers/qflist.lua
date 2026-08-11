@@ -6,12 +6,12 @@ local ui           = require("ezpick.util.ui")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS        = {
-    { name = "errors",   type = "boolean",             desc = "show error items" },
-    { name = "warnings", type = "boolean",             desc = "show warning items" },
-    { name = "info",     type = "boolean",             desc = "show info items" },
-    { name = "hints",    type = "boolean",             desc = "show hint items" },
-    { name = "filter",   type = "value", multi = true, desc = "glob filter: *.txt, **/dir/**" },
-    { name = "valid",    type = "boolean",             desc = "only items with a resolved location" },
+    { name = "errors",   type = "boolean", desc = "show error items" },
+    { name = "warnings", type = "boolean", desc = "show warning items" },
+    { name = "info",     type = "boolean", desc = "show info items" },
+    { name = "hints",    type = "boolean", desc = "show hint items" },
+    { name = "filter",   type = "value",   multi = true,                                desc = "glob filter: *.txt, **/dir/**" },
+    { name = "valid",    type = "boolean", desc = "only items with a resolved location" },
 }
 
 -- Boolean type flags onto the qf `type` code they select. Several may be
@@ -79,7 +79,7 @@ local function render_qftf(list_type, winid, list)
     local get        = is_loclist
         and function(what) return vim.fn.getloclist(winid, what) end
         or function(what) return vim.fn.getqflist(what) end
-    local qftf = get({ quickfixtextfunc = 1 }).quickfixtextfunc
+    local qftf       = get({ quickfixtextfunc = 1 }).quickfixtextfunc
     if not qftf or qftf == "" then return nil end
     local id = get({ id = 0 }).id
     local ok, lines = pcall(vim.fn.call, qftf, { {
@@ -109,15 +109,15 @@ end
 ---@param opts {filter:ezpick.qflist_filter?, list_type:ezpick.qflist_type?, winid:integer?}?
 ---@return ezpick.PickerSpec?
 function M.spec(opts)
-    opts = opts or {}
-    local filter      = opts.filter or "all"
-    local list_type   = opts.list_type or "quickfix"
-    local winid       = opts.winid or vim.fn.win_getid()
-    local is_loclist  = list_type == "loclist"
+    opts                                = opts or {}
+    local filter                        = opts.filter or "all"
+    local list_type                     = opts.list_type or "quickfix"
+    local winid                         = opts.winid or vim.fn.win_getid()
+    local is_loclist                    = list_type == "loclist"
     local qflist, current_idx, rendered = get_list(list_type, winid)
-    local list_label  = is_loclist and "Location List" or "Quickfix"
+    local list_label                    = is_loclist and "Location List" or "Quickfix"
 
-    local entries = {}
+    local entries                       = {}
     for idx, qf in ipairs(qflist) do
         if matches_filter(qf, filter) then
             local data = read_qf_item(qf, rendered and rendered[idx])
@@ -169,22 +169,34 @@ function M.spec(opts)
                 end
                 if skip then goto continue end
 
-                local text  = vim.trim(data.text ~= "" and data.text or "[No description]")
+                local loc = nil
+                if data.relpath and #data.relpath > 0 then
+                    if data.lnum > 0 then
+                        if data.col > 0 then
+                            loc = string.format("%s:%d:%d", data.relpath, data.lnum, data.col)
+                        else
+                            loc = string.format("%s:%d", data.relpath, data.lnum)
+                        end
+                    else
+                        loc = data.relpath
+                    end
+                end
+                ---@type string?
+                local text = (data.text and data.text ~= "") and vim.trim(data.text) or nil
+                if not text or #text == "" then
+                    text, loc = loc, nil
+                end
                 -- Deliberately unscored: the order of a quickfix list is the
                 -- compiler's or the search's, and reordering it would lose the
                 -- sequence the user is working through.
-                local match = pickertools.match_label(text, query)
+                local match = text and pickertools.match_label(text, query) or nil
                 if match then
                     local chunks = { _type_prefix[data.type] or _type_prefix.N }
                     vim.list_extend(chunks, match.chunks)
-                    local virt_line = nil
-                    if data.relpath and #data.relpath > 0 then
-                        virt_line = { { string.format("%s:%d:%d", data.relpath, data.lnum, data.col), "EzPickPath" } }
-                    end
                     ---@type ezpick.Picker.Item
                     table.insert(items, {
                         label_chunks = chunks,
-                        virt_line    = virt_line,
+                        virt_line    = loc and { { loc, "EzPickPath" } } or nil,
                         data         = data,
                     })
                 end

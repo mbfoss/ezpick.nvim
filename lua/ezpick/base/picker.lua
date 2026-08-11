@@ -44,9 +44,9 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@alias ezpick.Picker.Callback fun(data:ezpick.picker.ItemData?)
 
 ---@class ezpick.Picker.FetcherOpts
----@field list_width number
----@field list_height number
+---@field line_width number
 ---@field virt_line_width number
+---@field list_height number
 ---@field parsed ezpick.queryflags.ParseResult?
 ---@field data table? Setup data supplied by the picker spec.
 
@@ -1313,9 +1313,9 @@ function Picker:run_fetch()
 	local fetch_opts = {
 		-- The window width is the content area; the two columns come off for
 		-- the prefix every row is written behind, not for the border.
-		list_width      = math.max(1, self.layout.list_width - 2),
-		list_height     = math.max(1, self.layout.list_height),
+		line_width      = math.max(1, self.layout.list_width - 2),
 		virt_line_width = math.max(1, self.layout.list_width - 5),
+		list_height     = math.max(1, self.layout.list_height),
 	}
 
 	local clean_query, flags
