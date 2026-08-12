@@ -932,9 +932,9 @@ end
 ---Redraw the rule's right end. The footer is part of the window config, so it
 ---is also handed to `prompt_cfg` for the floats `relayout` builds from scratch.
 function Picker:render_status()
-	if not (self.pwin and vim.api.nvim_win_is_valid(self.pwin)) then return end
 	-- schedule footer config to avoid cursor flicker
 	vim.schedule(function()
+		if not (self.pwin and vim.api.nvim_win_is_valid(self.pwin)) then return end
 		vim.api.nvim_win_set_config(self.pwin, {
 			-- An empty string is how the config clears a footer already drawn.
 			footer = self:_status_chunks() or "",
