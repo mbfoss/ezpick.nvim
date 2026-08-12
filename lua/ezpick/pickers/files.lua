@@ -20,98 +20,15 @@ local icons       = require("ezpick.icons")
 ---@field case_sensitive boolean?
 ---@field follow_symlinks boolean?
 ---@field show_hidden boolean?
----@field extensions string[]? only files with one of these extensions (no dot, lowercase)
----@field exclude_globs string[]? paths matching one of these globs are skipped
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
-    { name = "dir",           type = "value",   complete = "dir",                                alias = { "base-directory", "search-path" }, desc = "override search root directory" },
-    { name = "mode",          type = "value",   strict = true,                                   values = { "fuzzy", "fixed", "glob" },       desc = "match: fuzzy (default) | fixed (literal substring) | glob (rg-style globs, space separated)" },
-    { name = "case",          type = "value",   strict = true,                                   values = { "smart", "on", "off" },           desc = "case: smart (default) | on | off" },
-    { name = "follow",        type = "boolean", alias = { "follow-symlinks" },                    desc = "follow symlinks" },
-    { name = "hidden",        type = "boolean", desc = "include hidden (dotfiles)" },
-    -- fd spellings, kept beside the flags above rather than in place of them: an
-    -- fd habit types out here without a lookup, and each one is only another way
-    -- to write a `--mode` / `--case` value.
-    -- Single-letter fd spellings are deliberately absent: names here are matched
-    -- case-insensitively, so `-e` and `-E` would be one flag rather than two.
-    { name = "glob",          type = "boolean", desc = "same as --mode glob" },
-    { name = "fixed-strings", type = "boolean", alias = { "fixed" },                             desc = "same as --mode fixed" },
-    { name = "case-sensitive", type = "boolean", desc = "same as --case on" },
-    { name = "ignore-case",   type = "boolean", desc = "same as --case off" },
-    { name = "extension",     type = "value",   multi = true,                                    alias = { "ext" },                           desc = "only files with this extension (repeatable)" },
-    { name = "exclude",       type = "value",   multi = true,                                    desc = "skip paths matching this glob (repeatable)" },
-    { name = "max-results",   type = "value",   desc = "stop after this many matches" },
+    { name = "dir",    type = "value",   complete = "dir",                  desc = "override search root directory" },
+    { name = "mode",   type = "value",   strict = true,                     values = { "fuzzy", "fixed", "glob" },  desc = "match: fuzzy (default) | fixed (literal substring) | glob (rg-style globs, space separated)" },
+    { name = "case",   type = "value",   strict = true,                     values = { "smart", "on", "off" },      desc = "case: smart (default) | on | off" },
+    { name = "follow", type = "boolean", desc = "follow symlinks" },
+    { name = "hidden", type = "boolean", desc = "include hidden (dotfiles)" },
 }
-
---- Resolve the match mode: `--mode` is the explicit spelling and wins, with the
---- fd switches (`--glob`, `--fixed-strings`) standing in for its values.
----@param flags table
----@return ezpick.filepicker.Mode
-local function resolve_mode(flags)
-    if flags.mode then return flags.mode end
-    if flags.glob then return "glob" end
-    if flags["fixed-strings"] then return "fixed" end
-    return "fuzzy"
-end
-
---- Resolve the case flag value the same way: `--case` wins over fd's
---- `--case-sensitive` / `--ignore-case` switches.
----@param flags table
----@return string? "on"|"off"|"smart"|nil
-local function resolve_case_flag(flags)
-    if flags.case then return flags.case end
-    if flags["case-sensitive"] then return "on" end
-    if flags["ignore-case"] then return "off" end
-    return nil
-end
-
---- Normalize `--extension` values into bare lowercase extensions, so `--ext .LUA`
---- and `--ext lua` name the same files. Returns nil when nothing usable is left,
---- which reads downstream as "no extension filter".
----@param values string[]|string|nil
----@return string[]?
-local function normalize_extensions(values)
-    if not values then return nil end
-    if type(values) == "string" then values = { values } end
-    local exts = {}
-    for _, v in ipairs(values) do
-        local ext = v:gsub("^%.+", ""):lower()
-        if ext ~= "" then exts[#exts + 1] = ext end
-    end
-    return #exts > 0 and exts or nil
-end
-
---- Does `filename` carry one of `exts`? A nil filter passes everything.
----@param filename string
----@param exts string[]?
----@return boolean
-local function match_extension(filename, exts)
-    if not exts then return true end
-    local ext = filename:match("%.([^.]+)$")
-    if not ext then return false end
-    ext = ext:lower()
-    return vim.tbl_contains(exts, ext)
-end
-
---- Expand an `--exclude` glob into the patterns that make it match at any depth,
---- the way fd's `-E` does: a glob naming no directory (`node_modules`, `*.min.js`)
---- also gets a `**/` form, while one that spells a path out (`src/*.lua`) is
---- taken as written and stays anchored at the search root.
----@param globs string[]|string|nil
----@return string[]?
-local function expand_exclude_globs(globs)
-    if not globs then return nil end
-    if type(globs) == "string" then globs = { globs } end
-    local out = {}
-    for _, g in ipairs(globs) do
-        if g ~= "" then
-            out[#out + 1] = g
-            if not g:find("/") then out[#out + 1] = "**/" .. g end
-        end
-    end
-    return #out > 0 and out or nil
-end
 
 --- Resolve a `case` flag value into a case-sensitivity decision.
 ---
@@ -234,10 +151,7 @@ local function async_lua_search(query, opts, fetch_opts, callback)
     local mode               = opts.mode or "fuzzy"
     local globs              = mode == "glob" and split_globs(query) or nil
 
-    local extensions         = opts.extensions
-
     local base_excludes      = opts.show_hidden and {} or { ".*", "**/.*" }
-    vim.list_extend(base_excludes, opts.exclude_globs or {})
     local exclude_regex_list = strutil.compile_globs(base_excludes)
 
     local aborted            = false
@@ -261,7 +175,6 @@ local function async_lua_search(query, opts, fetch_opts, callback)
             -- inter-slice yield lets Neovim redraw (and animate the spinner)
             -- on its own.
             on_file            = function(filepath, filename, relative_path)
-                if not match_extension(filename, extensions) then return end
                 local res = do_match(filename, relative_path, query, mode, opts.case_sensitive, globs)
                 if not res then return end
                 if count >= max_results then
@@ -305,18 +218,17 @@ function M.spec(opts)
             local target_cwd = flags.dir or opts.cwd or vim.fn.getcwd()
             target_cwd = vim.fn.expand(target_cwd)
 
+            ---@type ezpick.filepicker.Mode
+            local mode = flags.mode or "fuzzy"
+
             ---@type ezpick.filepicker.SearchOpts
             local search_opts = {
                 cwd             = target_cwd,
-                mode            = resolve_mode(flags),
-                -- A non-numeric `--max-results` is ignored rather than read as 0:
-                -- a typo there should not silently empty the result list.
-                max_results     = tonumber(flags["max-results"]) or opts.max_results,
-                case_sensitive  = resolve_case(resolve_case_flag(flags), query),
+                mode            = mode,
+                max_results     = opts.max_results,
+                case_sensitive  = resolve_case(flags.case, query),
                 follow_symlinks = flags.follow,
                 show_hidden     = flags.hidden,
-                extensions      = normalize_extensions(flags.extension),
-                exclude_globs   = expand_exclude_globs(flags.exclude),
             }
             return async_lua_search(query, search_opts, fetch_opts, callback)
         end,
@@ -331,12 +243,7 @@ function M.spec(opts)
 end
 
 -- Exposed for tests.
-M._resolve_case         = resolve_case
-M._do_match             = do_match
-M._resolve_mode         = resolve_mode
-M._resolve_case_flag    = resolve_case_flag
-M._normalize_extensions = normalize_extensions
-M._match_extension      = match_extension
-M._expand_exclude_globs = expand_exclude_globs
+M._resolve_case = resolve_case
+M._do_match     = do_match
 
 return M
