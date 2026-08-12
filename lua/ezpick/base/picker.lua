@@ -114,7 +114,7 @@ local _RULE              = "─"
 ---Marks the line under the query as a remark about the query rather than more of
 ---it. The trailing space is part of it: the two run together otherwise.
 ---@type string
-local _HINT_ICON = "⚠ "
+local _HINT_ICON = "󰀪 "
 
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
