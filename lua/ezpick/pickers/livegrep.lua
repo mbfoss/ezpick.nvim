@@ -426,6 +426,13 @@ local function make_item(m, abs_path, cwd, path_width, show_repl, rel_path, from
     }
 end
 
+--- A parsed match held until it can be turned into an item on the main loop.
+---@class ezpick.livegrep.Record
+---@field m           ezpick.rgutil.Match
+---@field abs_path    string
+---@field rel_path    string?
+---@field from_buffer boolean?
+
 ---@param filepath string  absolute path
 ---@return integer? bufnr  a loaded buffer holding this exact file, if any
 local function loaded_buf_for(filepath)
@@ -536,21 +543,41 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
     end
 
     local cancelled = false
-    local buf_items = {} ---@type ezpick.Picker.Item[]
-    local dir_items = {} ---@type ezpick.Picker.Item[]
+    local buf_recs  = {} ---@type ezpick.livegrep.Record[]
+    local dir_recs  = {} ---@type ezpick.livegrep.Record[]
+    local errors    = {} ---@type string[]
     local buf_handle ---@type ezpick.util.SpawnHandle?
     local dir_handle ---@type ezpick.util.SpawnHandle?
 
     -- Both searches run as async rg jobs; finish() fires once both have settled,
     -- with buffer matches leading the merged list.
+    --
+    -- rg's output is parsed inside libuv's read callbacks, which may not measure
+    -- display width (nvim_strwidth is not fast-context safe), so those only
+    -- record parsed matches. Items are built here instead: finish() runs on the
+    -- main loop (spawn schedules its exit callback), and costs one pass over the
+    -- kept records rather than a schedule per chunk.
     local pending = 2
     local function finish()
         if cancelled then return end
+        local recs = {}
+        vim.list_extend(recs, buf_recs)
+        vim.list_extend(recs, dir_recs)
+        for i = #recs, max_results + 1, -1 do
+            recs[i] = nil
+        end
+
         local merged = {}
-        vim.list_extend(merged, buf_items)
-        vim.list_extend(merged, dir_items)
-        for i = #merged, max_results + 1, -1 do
-            merged[i] = nil
+        for _, msg in ipairs(errors) do
+            ---@type ezpick.Picker.Item
+            merged[#merged + 1] = {
+                label_chunks = { { "ERROR: ", "Error" }, { msg } },
+                data         = {},
+            }
+        end
+        for _, r in ipairs(recs) do
+            merged[#merged + 1] =
+                make_item(r.m, r.abs_path, cwd, path_width, show_repl, r.rel_path, r.from_buffer)
         end
         callback(merged)
     end
@@ -583,8 +610,12 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
                     if b then
                         m.lnum = lnum
                         m.path = b.path
-                        buf_items[#buf_items + 1] =
-                            make_item(m, b.path, cwd, path_width, show_repl, b.relpath, true)
+                        buf_recs[#buf_recs + 1] = {
+                            m           = m,
+                            abs_path    = b.path,
+                            rel_path    = b.relpath,
+                            from_buffer = true,
+                        }
                         buf_count = buf_count + 1
                         if buf_count >= max_results then
                             stop_buf = true
@@ -650,11 +681,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
     local count     = 0
 
     local function on_error(msg)
-        ---@type ezpick.Picker.Item
-        table.insert(dir_items, {
-            label_chunks = { { "ERROR: ", "Error" }, { msg } },
-            data         = {},
-        })
+        errors[#errors + 1] = msg
     end
 
     local buffered_feed = strutil.create_line_buffered_feed(function(lines)
@@ -666,8 +693,11 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
                 local rel_path = fsutil.get_relative_path(abs_path, cwd)
                 -- Skip files already covered by the in-buffer search.
                 if not (rel_path and open_relpaths[rel_path]) then
-                    dir_items[#dir_items + 1] =
-                        make_item(m, abs_path, cwd, path_width, show_repl, rel_path)
+                    dir_recs[#dir_recs + 1] = {
+                        m        = m,
+                        abs_path = abs_path,
+                        rel_path = rel_path,
+                    }
                     count = count + 1
                     if count >= max_results then
                         stop_read = true
