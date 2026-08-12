@@ -22,7 +22,11 @@ local _NS_PREVIEW        = vim.api.nvim_create_namespace("ezpick_PickerPreview")
 local _EMPTY_COMPLETION  = { words = {}, refresh = "always" }
 
 local _antiflicker_delay = 200
-local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Title"
+local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Title," ..
+	"WinBar:Normal,WinBarNC:Normal"
+
+---Fills the list's winbar, so it reads as the rule between prompt and items.
+local _RULE              = "─"
 
 ---@class ezpick.picker.ItemData
 ---@field filepath string?
@@ -715,18 +719,16 @@ function Picker:relayout()
 	-- relayout on every keystroke.
 	self._prompt_wrapped = wrapped
 
+	-- The list has no top border: its first row is the winbar drawing the rule
+	-- above the items, which is what the extra row of height pays for.
 	---@return table
 	local function list_cfg()
 		return vim.tbl_extend("force", base_cfg, {
 			row = self.layout.list_row,
 			col = self.layout.list_col,
 			width = self.layout.list_width,
-			height = self.layout.list_height,
+			height = self.layout.list_height + 1,
 			border = self.layout.list_border,
-			-- The rule above the items is this float's top border, so the status
-			-- indicators ride on it as a title; see `render_status`.
-			title = self:_status_chunks() or "",
-			title_pos = "right",
 		})
 	end
 
@@ -748,6 +750,10 @@ function Picker:relayout()
 			end)
 		vim.wo[self.lwin].winhighlight = winhl
 		vim.wo[self.lwin].wrap = self.opts.list_wrap ~= false
+		-- `wbr` is what `%=` stretches across the winbar; `eob` comes with the
+		-- window's `style = "minimal"`, and setting 'fillchars' here drops it.
+		vim.wo[self.lwin].fillchars = "eob: ,wbr:" .. _RULE
+		vim.wo[self.lwin].winbar = self:_status_winbar()
 		self:_apply_wrap_indent()
 	else
 		vim.api.nvim_win_set_config(self.lwin, list_cfg())
@@ -905,43 +911,33 @@ function Picker:render_spinner()
 	self:render_status()
 end
 
----Chunks for the rule below the prompt: the spinner while a fetch is in flight,
----then the position counter. They live on the rule rather than on the prompt
----line so that a query long enough to reach the right edge no longer collides
----with them.
----@return table[]? title Title chunks, nil for a bare rule: neither
----`nvim_open_win` nor `nvim_win_set_config` takes an empty array, so callers
----pass `""` in its place.
-function Picker:_status_chunks()
-	local chunks = {}
+---The list's winbar: the rule below the prompt, with the spinner while a fetch
+---is in flight and then the position counter at its right end. They live on the
+---rule rather than on the prompt line so that a query long enough to reach the
+---right edge no longer collides with them. The rule itself is the `wbr` fill
+---char stretched by `%=`, so the winbar is never empty -- an empty 'winbar'
+---would take the row back and pull the items up into it.
+---@return string
+function Picker:_status_winbar()
+	local text = ""
 	if self._spinner_frame then
-		chunks[#chunks + 1] = { " " .. self._spinner_frame, "NonText" }
+		text = text .. " " .. self._spinner_frame
 	end
 	-- A hint about the query says more than the count does, and only one of the
 	-- two is shown at a time.
 	local total = #self.list_items
 	if not self._query_hint and total > 0 then
-		local cur = self:get_cursor() or 1
-		chunks[#chunks + 1] = { string.format(" %d/%d", cur, total), "NonText" }
+		text = text .. string.format(" %d/%d", self:get_cursor() or 1, total)
 	end
-	if #chunks == 0 then return nil end
-	return chunks
+	-- A spinner frame is arbitrary text; `%` in a winbar is an item introducer.
+	return "%#NonText#%=" .. text:gsub("%%", "%%%%")
 end
 
----Redraw the rule's right end. The rule is the list float's top border, so the
----indicators are that float's title -- part of its window config, and so also
----handed to `list_cfg` for the floats `relayout` builds from scratch.
+---Redraw the rule's right end. The rule is the list float's winbar, a
+---window-local option, so this touches neither window config nor the prompt.
 function Picker:render_status()
-	local title = self:_status_chunks() or ""
-	-- schedule title config to avoid cursor flicker
-	vim.schedule(function()
-		if not (self.lwin and vim.api.nvim_win_is_valid(self.lwin)) then return end
-		vim.api.nvim_win_set_config(self.lwin, {
-			-- An empty string is how the config clears a title already drawn.
-			title = title,
-			title_pos = "right",
-		})
-	end)
+	if not (self.lwin and vim.api.nvim_win_is_valid(self.lwin)) then return end
+	vim.wo[self.lwin].winbar = self:_status_winbar()
 end
 
 ---Kept as the name the count's own callers use; the rule carries the count.
@@ -994,8 +990,10 @@ function Picker:_reveal_virt_lines(row)
 			end_row = row - 1,
 		}).all
 		-- Only act when the entry's last row is the bottom row of the viewport.
+		-- `winline()` counts from the first text row, which the winbar's own row
+		-- is not, while the window height counts it.
 		local bottom_row = vim.fn.winline() + line_height - 1
-		if bottom_row < vim.api.nvim_win_get_height(self.lwin) then return end
+		if bottom_row < vim.api.nvim_win_get_height(self.lwin) - 1 then return end
 		local view = vim.fn.winsaveview()
 		view.topline = view.topline + 1
 		vim.fn.winrestview(view)

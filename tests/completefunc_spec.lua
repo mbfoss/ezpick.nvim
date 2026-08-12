@@ -145,7 +145,7 @@ describe("picker query hints", function()
         end
 
         -- The hint gets a virtual line under the query; the position counter
-        -- rides on the rule below it, as the list float's right-aligned title.
+        -- rides on the rule below it, at the right end of the list float's winbar.
         local hint
         local marked = 0
         local counted = false
@@ -159,15 +159,10 @@ describe("picker query hints", function()
             end
             if m[4] and m[4].hl_group == "DiagnosticUnderlineWarn" then marked = marked + 1 end
         end
-        -- Any float but the prompt's: the counter is the list window's title,
+        -- Any float but the prompt's: the counter is the list window's winbar,
         -- and the list is the only other one this picker opens.
         for _, w in ipairs(vim.api.nvim_list_wins()) do
-            local title = w ~= pwin and vim.api.nvim_win_get_config(w).title
-            if type(title) == "table" then
-                for _, chunk in ipairs(title) do
-                    if chunk[1]:find("%d+/%d+") then counted = true end
-                end
-            end
+            if w ~= pwin and vim.wo[w].winbar:find("%d+/%d+") then counted = true end
         end
 
         return seen_query, seen_flags, hint, marked, counted

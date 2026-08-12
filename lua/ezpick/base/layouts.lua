@@ -24,20 +24,20 @@ local _FALLBACK = { width_ratio = 0.6, height_ratio = 0.7 }
 ---has to allow for it or the picker sits two cells low and two cells right.
 local _BORDER_SPAN = 2
 
----Helix-style framing. The rule dividing the two floats is the list's *top*
----border rather than the prompt's bottom one: a float draws its title on its top
----border, and the status indicators ride on the rule (see `Picker:render_status`).
----The corners either side of it continue the frame's sides, so the two floats
----still read as one box.
+---Helix-style framing. The rule dividing the two floats is drawn by neither
+---border: it is the list's winbar, which is also what the status indicators ride
+---on (see `Picker:render_status`). The list therefore has no top border, and its
+---window is one row taller than its items to pay for the winbar; the frame's
+---sides run either side of it, so the two floats still read as one box.
 local _BORDER_TOP    = { "╭", "─", "╮", "│", "", "", "", "│" }
-local _BORDER_BOTTOM = { "│", { "─", "NonText" }, "│", "│", "╯", "─", "╰", "│" }
+local _BORDER_BOTTOM = { "", "", "", "│", "╯", "─", "╰", "│" }
 local _BORDER_FULL = "rounded"
 
 ---Rows the prompt float covers for a one-line query: its top border and the
 ---line of text. `nvim_open_win` places a bordered float by its outer edge, so
----the list starts on the row after them -- the rule it draws up there is the
----third row between the frame's top edge and its first item. A wrapped prompt is
----taller than one line; see `_split_frame`.
+---the list starts on the row after them -- the rule its winbar draws up there is
+---the third row between the frame's top edge and its first item. A wrapped
+---prompt is taller than one line; see `_split_frame`.
 local _PROMPT_ROWS = 2
 
 ---@type fun(v:number,min:number,max:number):number
@@ -137,7 +137,7 @@ function M.get_horizontal_layout(opts)
         prompt_border = _BORDER_TOP,
 
         -- Past the prompt's rows -- border and wrapped query; the row the list
-        -- opens on is the rule, which is its own top border.
+        -- opens on is the rule, which is its own winbar.
         list_row = row + _PROMPT_ROWS + prompt_height - 1,
         list_col = col,
         list_width = list_width,
