@@ -1,10 +1,10 @@
-local M           = {}
+local M                = {}
 
-local ui          = require("ezpick.util.ui")
-local strutil     = require("ezpick.util.strutil")
-local fsutil      = require("ezpick.util.fsutil")
-local spawn       = require("ezpick.util.spawn")
-local pickertools = require("ezpick.base.pickertools")
+local ui               = require("ezpick.util.ui")
+local strutil          = require("ezpick.util.strutil")
+local fsutil           = require("ezpick.util.fsutil")
+local spawn            = require("ezpick.util.spawn")
+local pickertools      = require("ezpick.base.pickertools")
 
 --- High-water mark (bytes) for stdin backpressure: buffers are fed to rg ahead
 --- of itself for throughput, but once its stdin write queue is backed up past
@@ -109,8 +109,8 @@ local function apply_subs(text, subs)
     local parts = {}
     local last  = 1
     for _, sm in ipairs(subs) do
-        local s = sm.s + 1
-        local e = sm.e
+        local s           = sm.s + 1
+        local e           = sm.e
         parts[#parts + 1] = text:sub(last, s - 1)
         parts[#parts + 1] = sm.repl or text:sub(s, e)
         last              = e + 1
@@ -213,20 +213,21 @@ local function complete_type(partial)
 end
 
 ---@type ezpick.queryflags.FlagDef[]
-local FLAGS       = {
-    { name = "dir",     type = "value",   complete = "dir",          desc = "search root directory"              },
-    { name = "filter",  type = "value",   multi = true,              desc = "glob filter: *.txt, !*.lua, **/dir/**" },
-    { name = "type",      type = "value", multi = true, complete = complete_type, desc = "rg file type: lua, rust, !md (see rg --type-list)" },
-    { name = "regex",   type = "boolean", desc = "enable regex mode"                                             },
-    { name = "case",    type = "value",   strict = true, values = { "smart", "on", "off" }, desc = "case: smart (default) | on | off" },
-    { name = "word",      type = "boolean", desc = "match whole words only"                                      },
-    { name = "line",      type = "boolean", desc = "match whole lines only"                                      },
-    { name = "invert",    type = "boolean", desc = "show lines that do NOT match"                                 },
-    { name = "follow",    type = "boolean", desc = "follow symlinks"                                             },
-    { name = "hidden",    type = "boolean", desc = "include hidden (dotfiles)"                                   },
-    { name = "no-ignore", type = "boolean", desc = "disable .gitignore / .ignore rules"                         },
-    { name = "max-depth", type = "value",   desc = "max directory depth to descend"                              },
-    { name = "replace",   type = "value",                            desc = "replacement text (--replace= deletes)" },
+local FLAGS = {
+    { name = "dir",       type = "value",   complete = "dir",                              desc = "search root directory" },
+    { name = "filter",    type = "value",   multi = true,                                  desc = "glob filter: *.txt, !*.lua, **/dir/**" },
+    { name = "type",      type = "value",   multi = true,                                  complete = complete_type,                      desc = "rg file type: lua, rust, !md (see rg --type-list)" },
+    { name = "regex",     type = "boolean", desc = "enable regex mode" },
+    { name = "case",      type = "value",   strict = true,                                 values = { "smart", "on", "off" },             desc = "case: smart (default) | on | off" },
+    { name = "nocase",    type = "boolean", desc = "case-insensitive (same as --case off)" },
+    { name = "word",      type = "boolean", desc = "match whole words only" },
+    { name = "line",      type = "boolean", desc = "match whole lines only" },
+    { name = "invert",    type = "boolean", desc = "show lines that do NOT match" },
+    { name = "follow",    type = "boolean", desc = "follow symlinks" },
+    { name = "hidden",    type = "boolean", desc = "include hidden (dotfiles)" },
+    { name = "no-ignore", type = "boolean", desc = "disable .gitignore / .ignore rules" },
+    { name = "max-depth", type = "value",   desc = "max directory depth to descend" },
+    { name = "replace",   type = "value",   desc = "replacement text (--replace= deletes)" },
 }
 
 
@@ -250,7 +251,9 @@ local function build_rg_base(parsed)
         table.insert(args, "--no-ignore")
     end
 
-    if flags.case == "on" then
+    if flags.nocase then
+        table.insert(args, "--ignore-case")
+    elseif flags.case == "on" then
         table.insert(args, "--case-sensitive")
     elseif flags.case == "off" then
         table.insert(args, "--ignore-case")
@@ -291,7 +294,7 @@ local function build_rg_dir_cmd(parsed)
     local args = build_rg_base(parsed)
     table.insert(args, "--sort")
     table.insert(args, "path")
-    for _, g in ipairs(parsed.flags["filter"] or {}) do
+    for _, g in ipairs(parsed.flags["glob"] or {}) do
         table.insert(args, "-g")
         table.insert(args, g)
     end
@@ -494,8 +497,8 @@ local function buffer_line_offsets(bufs)
     local starts    = {}
     local next_line = 1
     for i, b in ipairs(bufs) do
-        starts[i]  = next_line
-        next_line  = next_line + vim.api.nvim_buf_line_count(b.bufnr)
+        starts[i] = next_line
+        next_line = next_line + vim.api.nvim_buf_line_count(b.bufnr)
     end
     return starts
 end
@@ -524,16 +527,16 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
         return
     end
 
-    local show_repl   = parsed.flags.replace ~= nil
-    local max_results = grep_opts.max_results or 10000
-    local cwd         = grep_opts.cwd
-    local path_width  = fetch_opts.virt_line_width
+    local show_repl     = parsed.flags.replace ~= nil
+    local max_results   = grep_opts.max_results or 10000
+    local cwd           = grep_opts.cwd
+    local path_width    = fetch_opts.virt_line_width
 
     -- Open buffers take priority: search their in-memory text, then drop the
     -- on-disk matches for those same files so stale disk content never wins.
-    local bufs = collect_open_buffers(
+    local bufs          = collect_open_buffers(
         cwd,
-        parsed.flags["filter"],
+        parsed.flags["glob"],
         parsed.flags["type"],
         tonumber(parsed.flags["max-depth"])
     )
@@ -557,7 +560,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
     -- record parsed matches. Items are built here instead: finish() runs on the
     -- main loop (spawn schedules its exit callback), and costs one pass over the
     -- kept records rather than a schedule per chunk.
-    local pending = 2
+    local pending   = 2
     local function finish()
         if cancelled then return end
         local recs = {}
@@ -595,12 +598,12 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
     if #bufs == 0 then
         settle()
     else
-        local starts   = buffer_line_offsets(bufs)
-        local stop_buf = false
-        local buf_done = false
+        local starts    = buffer_line_offsets(bufs)
+        local stop_buf  = false
+        local buf_done  = false
         local buf_count = 0
 
-        local buf_feed = strutil.create_line_buffered_feed(function(lines)
+        local buf_feed  = strutil.create_line_buffered_feed(function(lines)
             for _, line in ipairs(lines) do
                 if stop_buf then return end
                 local m = parse_match(line)
@@ -740,18 +743,18 @@ end
 ---@param opts ezpick.livegrep.opts?
 ---@return ezpick.PickerSpec
 function M.spec(opts)
-    opts = opts or {}
+    opts              = opts or {}
 
-    local _last_items    = {} ---@type ezpick.Picker.Item[]
+    local _last_items = {} ---@type ezpick.Picker.Item[]
     local _replace_value ---@type string?
 
     ---@type ezpick.PickerSpec
     return {
-        prompt          = "Live Grep",
-        flags           = FLAGS,
-        enable_preview  = true,
-        previewer       = buffer_preview,
-        finder           = function(query, flags, fetch_opts, callback)
+        prompt         = "Live Grep",
+        flags          = FLAGS,
+        enable_preview = true,
+        previewer      = buffer_preview,
+        finder         = function(query, flags, fetch_opts, callback)
             local parsed     = { query = query, flags = flags }
             local target_cwd = flags.dir and vim.fn.expand(flags.dir) or vim.fn.getcwd()
             _replace_value   = flags.replace
@@ -763,7 +766,7 @@ function M.spec(opts)
                 callback(items)
             end)
         end,
-        on_confirm = function(data)
+        on_confirm     = function(data)
             if not data then return end
             if _replace_value then
                 local total, file_count = count_matches(_last_items)

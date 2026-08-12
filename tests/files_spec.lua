@@ -1,18 +1,37 @@
 local files = require("ezpick.pickers.files")
 
 local resolve_case = files._resolve_case
+local resolve_mode = files._resolve_mode
 local do_match     = files._do_match
 
-describe("resolve_case", function()
-    it("honors explicit on/off", function()
-        assert.is_true(resolve_case("on", "foo"))
-        assert.is_false(resolve_case("off", "FOO"))
+describe("resolve_mode", function()
+    it("defaults to fuzzy with no mode flag set", function()
+        assert.are.equal("fuzzy", resolve_mode({}))
     end)
 
-    it("smart-cases on uppercase for literal text", function()
-        assert.is_false(resolve_case("smart", "foo"))
-        assert.is_true(resolve_case("smart", "Foo"))
-        assert.is_false(resolve_case(nil, "foo"))
+    it("names the mode of whichever flag is set", function()
+        assert.are.equal("fixed", resolve_mode({ fixed = true }))
+        assert.are.equal("glob", resolve_mode({ glob = true }))
+    end)
+
+    it("picks one when several are set", function()
+        assert.are.equal("glob", resolve_mode({ glob = true, fixed = true }))
+    end)
+end)
+
+describe("resolve_case", function()
+    it("honors the explicit case flags", function()
+        assert.is_true(resolve_case({ case = true }, "foo"))
+        assert.is_false(resolve_case({ nocase = true }, "FOO"))
+    end)
+
+    it("lets --case win over --nocase", function()
+        assert.is_true(resolve_case({ case = true, nocase = true }, "foo"))
+    end)
+
+    it("smart-cases on uppercase when neither is set", function()
+        assert.is_false(resolve_case({}, "foo"))
+        assert.is_true(resolve_case({}, "Foo"))
     end)
 end)
 
@@ -39,6 +58,27 @@ describe("do_match (fixed)", function()
         assert.not_nil(do_match("FooBar", "FooBar", "oob", "fixed", false))
         assert.is_nil(do_match("FooBar", "FooBar", "oob", "fixed", true))
         assert.not_nil(do_match("FooBar", "FooBar", "ooB", "fixed", true))
+    end)
+end)
+
+describe("do_match (inpath)", function()
+    it("matches over the relative path instead of the basename", function()
+        assert.not_nil(do_match("foo.lua", "src/foo.lua", "src/foo", "fixed", false, nil, true))
+        assert.is_nil(do_match("foo.lua", "src/foo.lua", "src/foo", "fixed", false, nil, false))
+        assert.not_nil(do_match("foo.lua", "src/deep/foo.lua", "sdfoo", "fuzzy", false, nil, true))
+        assert.is_nil(do_match("foo.lua", "src/deep/foo.lua", "sdfoo", "fuzzy", false, nil, false))
+    end)
+
+    it("highlights over the path, so the row can drop its directory prefix", function()
+        local res = do_match("foo.lua", "src/foo.lua", "src", "fixed", false, nil, true)
+        assert.not_nil(res)
+        assert.are.same({ { "src", "EzPickMatch" }, { "/foo.lua" } }, res.chunks)
+    end)
+
+    it("widens glob chunks to the path it already matched", function()
+        local res = do_match("foo.lua", "src/foo.lua", "*.lua", "glob", false, nil, true)
+        assert.not_nil(res)
+        assert.are.same({ { "src/foo.lua" } }, res.chunks)
     end)
 end)
 
