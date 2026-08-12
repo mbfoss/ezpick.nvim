@@ -173,7 +173,11 @@ prompt grows a row at a time to hold it — taking the rows from the list, up to
 even split with it.
 
 `files` accepts `--dir`, `--case`, `--mode` (`fuzzy`|`fixed`|`glob`),
-`--follow`, `--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
+`--follow`, `--hidden`, `--extension`, `--exclude` (both repeatable) and
+`--max-results`. It also takes the fd spellings of the flags above:
+`--base-directory`/`--search-path` for `--dir`, `--glob` and `--fixed-strings`
+for the matching `--mode` values, `--case-sensitive` and `--ignore-case` for
+`--case`. Where both are written, `--mode` and `--case` win. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
 `--replace`, `--regex`, `--word`, `--line`, `--invert`, `--follow`, `--hidden`,
 `--no-ignore`, `--max-depth`. `marks` accepts
 `--global` and `--buffer`, `registers` accepts `--empty`, and the symbol
@@ -182,6 +186,7 @@ several of which are OR'd together.
 
 ```
 :Pick files --hidden --dir ~/src
+:Pick files --extension lua --exclude node_modules --ignore-case picker
 :Pick live_grep --regex --filter *.lua fn%s+%w+
 :Pick live_grep --type lua --type !markdown --word setup
 :Pick live_grep --dir="~/my src" --replace= drop me   " delete every match
