@@ -85,12 +85,12 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---@field prompt_col number
 ---@field prompt_width number
 ---@field prompt_height number
----@field prompt_border string|table Border for the prompt float, as `nvim_open_win` takes it.
+---@field prompt_border string|table Border for the prompt float, as `nvim_open_win` takes it; shares a frame with the list, so it draws no bottom edge.
 ---@field list_row number
 ---@field list_col number
 ---@field list_width number
 ---@field list_height number
----@field list_border string|table Border for the list float; shares a frame with the prompt, so it draws no top edge.
+---@field list_border string|table Border for the list float; its top edge is the rule under the prompt, which carries the status indicators.
 ---@field preview_row number
 ---@field preview_col number
 ---@field preview_width number
@@ -645,10 +645,6 @@ function Picker:relayout()
 			border = self.layout.prompt_border,
 			title = title,
 			title_pos = "center",
-			-- The rule below the prompt is this float's bottom border, so the
-			-- status indicators ride on it as a footer; see `render_status`.
-			footer = self:_status_chunks() or "",
-			footer_pos = "right",
 		})
 	end
 
@@ -719,6 +715,21 @@ function Picker:relayout()
 	-- relayout on every keystroke.
 	self._prompt_wrapped = wrapped
 
+	---@return table
+	local function list_cfg()
+		return vim.tbl_extend("force", base_cfg, {
+			row = self.layout.list_row,
+			col = self.layout.list_col,
+			width = self.layout.list_width,
+			height = self.layout.list_height,
+			border = self.layout.list_border,
+			-- The rule above the items is this float's top border, so the status
+			-- indicators ride on it as a title; see `render_status`.
+			title = self:_status_chunks() or "",
+			title_pos = "right",
+		})
+	end
+
 	if not self.lwin then
 		if not self.lbuf then
 			self.lbuf = _create_buffer(false, function()
@@ -728,13 +739,7 @@ function Picker:relayout()
 				end
 			end)
 		end
-		self.lwin = ui.create_window(self.lbuf, false, vim.tbl_extend("force", base_cfg, {
-				row = self.layout.list_row,
-				col = self.layout.list_col,
-				width = self.layout.list_width,
-				height = self.layout.list_height,
-				border = self.layout.list_border,
-			}),
+		self.lwin = ui.create_window(self.lbuf, false, list_cfg(),
 			function()
 				self.lwin = nil
 				if not self.closed then
@@ -745,13 +750,7 @@ function Picker:relayout()
 		vim.wo[self.lwin].wrap = self.opts.list_wrap ~= false
 		self:_apply_wrap_indent()
 	else
-		vim.api.nvim_win_set_config(self.lwin, vim.tbl_extend("force", base_cfg, {
-			row = self.layout.list_row,
-			col = self.layout.list_col,
-			width = self.layout.list_width,
-			height = self.layout.list_height,
-			border = self.layout.list_border,
-		}))
+		vim.api.nvim_win_set_config(self.lwin, list_cfg())
 	end
 
 	-- The separators are drawn to the list width, so a list that survives a
@@ -899,7 +898,7 @@ function Picker:_render_prompt_marks(query)
 end
 
 ---Redraw the rule so the current spinner frame appears or disappears. The
----spinner rides in the footer next to the count, so drawing it is just a status
+---spinner rides on the rule next to the count, so drawing it is just a status
 ---redraw.
 ---@return nil
 function Picker:render_spinner()
@@ -910,7 +909,7 @@ end
 ---then the position counter. They live on the rule rather than on the prompt
 ---line so that a query long enough to reach the right edge no longer collides
 ---with them.
----@return table[]? footer Footer chunks, nil for a bare rule: neither
+---@return table[]? title Title chunks, nil for a bare rule: neither
 ---`nvim_open_win` nor `nvim_win_set_config` takes an empty array, so callers
 ---pass `""` in its place.
 function Picker:_status_chunks()
@@ -929,17 +928,18 @@ function Picker:_status_chunks()
 	return chunks
 end
 
----Redraw the rule's right end. The footer is part of the window config, so it
----is also handed to `prompt_cfg` for the floats `relayout` builds from scratch.
+---Redraw the rule's right end. The rule is the list float's top border, so the
+---indicators are that float's title -- part of its window config, and so also
+---handed to `list_cfg` for the floats `relayout` builds from scratch.
 function Picker:render_status()
-	local footer = self:_status_chunks() or ""
-	-- schedule footer config to avoid cursor flicker
+	local title = self:_status_chunks() or ""
+	-- schedule title config to avoid cursor flicker
 	vim.schedule(function()
-		if not (self.pwin and vim.api.nvim_win_is_valid(self.pwin)) then return end
-		vim.api.nvim_win_set_config(self.pwin, {
-			-- An empty string is how the config clears a footer already drawn.
-			footer = footer,
-			footer_pos = "right",
+		if not (self.lwin and vim.api.nvim_win_is_valid(self.lwin)) then return end
+		vim.api.nvim_win_set_config(self.lwin, {
+			-- An empty string is how the config clears a title already drawn.
+			title = title,
+			title_pos = "right",
 		})
 	end)
 end
