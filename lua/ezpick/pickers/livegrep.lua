@@ -218,8 +218,8 @@ local FLAGS = {
     { name = "filter",    type = "value",   multi = true,                                  desc = "glob filter: *.txt, !*.lua, **/dir/**" },
     { name = "type",      type = "value",   multi = true,                                  complete = complete_type,                      desc = "rg file type: lua, rust, !md (see rg --type-list)" },
     { name = "regex",     type = "boolean", desc = "enable regex mode" },
-    { name = "case",      type = "value",   strict = true,                                 values = { "smart", "on", "off" },             desc = "case: smart (default) | on | off" },
-    { name = "nocase",    type = "boolean", desc = "case-insensitive (same as --case off)" },
+    { name = "case",      type = "boolean", desc = "case-sensitive (default: smart case)" },
+    { name = "nocase",    type = "boolean", desc = "case-insensitive (default: smart case)" },
     { name = "word",      type = "boolean", desc = "match whole words only" },
     { name = "line",      type = "boolean", desc = "match whole lines only" },
     { name = "invert",    type = "boolean", desc = "show lines that do NOT match" },
@@ -251,11 +251,9 @@ local function build_rg_base(parsed)
         table.insert(args, "--no-ignore")
     end
 
-    if flags.nocase then
-        table.insert(args, "--ignore-case")
-    elseif flags.case == "on" then
+    if flags.case then
         table.insert(args, "--case-sensitive")
-    elseif flags.case == "off" then
+    elseif flags.nocase then
         table.insert(args, "--ignore-case")
     else
         table.insert(args, "--smart-case")
@@ -294,7 +292,7 @@ local function build_rg_dir_cmd(parsed)
     local args = build_rg_base(parsed)
     table.insert(args, "--sort")
     table.insert(args, "path")
-    for _, g in ipairs(parsed.flags["glob"] or {}) do
+    for _, g in ipairs(parsed.flags["filter"] or {}) do
         table.insert(args, "-g")
         table.insert(args, g)
     end
@@ -536,7 +534,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
     -- on-disk matches for those same files so stale disk content never wins.
     local bufs          = collect_open_buffers(
         cwd,
-        parsed.flags["glob"],
+        parsed.flags["filter"],
         parsed.flags["type"],
         tonumber(parsed.flags["max-depth"])
     )
