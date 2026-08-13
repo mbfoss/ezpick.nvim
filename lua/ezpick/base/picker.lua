@@ -983,8 +983,8 @@ function Picker:_render_virt_line(row, cursor)
 	local chunks = { { _LIST_PREFIX }, { "╰─ ", "NonText" } }
 	vim.list_extend(chunks, item.virt_line)
 	if cursor then
-		local width = 0
-		for i = 1, #chunks do
+		local width = vim.fn.strdisplaywidth(chunks[1][1])
+		for i = 2, #chunks do
 			local text, hl = chunks[i][1], chunks[i][2]
 			width = width + vim.fn.strdisplaywidth(text)
 			-- Stacked lowest priority first: the chunk's own group keeps its
