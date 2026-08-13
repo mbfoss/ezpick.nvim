@@ -14,6 +14,7 @@ local M                  = {}
 
 local _NS_CURSOR         = vim.api.nvim_create_namespace("ezpick_PickerCursor")
 local _NS_CONTENT        = vim.api.nvim_create_namespace("ezpick_PickerContent")
+local _NS_VLINE          = vim.api.nvim_create_namespace("ezpick_PickerVirtLine")
 local _NS_PREVIEW        = vim.api.nvim_create_namespace("ezpick_PickerPreview")
 
 -- Completion result carrying no candidates. `refresh = "always"` has to ride along
@@ -386,6 +387,7 @@ end
 ---@field _hint_col integer? -- prompt cursor column the shown hints were chosen for
 ---@field _spinner_frame string? -- spinner frame currently drawn on the prompt line, nil when idle
 ---@field _prompt_wrapped integer -- screen lines the prompt took when the picker was last laid out
+---@field _vline_row integer? -- list row whose virtual line currently carries the cursor-line highlight
 ---@field _in_relayout boolean? -- set while `relayout` runs, to keep the renderers it calls from calling it back
 local Picker = {}
 Picker.__index = Picker
@@ -409,6 +411,8 @@ function Picker:init(opts, callback)
 	self.preview_enabled       = opts.enable_preview == true
 
 	self.list_items            = {} ---@type ezpick.picker.ListItem[]
+
+	self._vline_row            = nil
 
 	self._prompt_wrapped       = 1
 
@@ -959,6 +963,43 @@ function Picker:render_cursor()
 		virt_text_pos = "overlay",
 		priority = 100,
 	})
+	-- The line the cursor leaves has to give the highlight back.
+	if self._vline_row and self._vline_row ~= cur then self:_render_virt_line(self._vline_row, false) end
+	self._vline_row = cur
+	self:_render_virt_line(cur, true)
+end
+
+---(Re)draw the virtual line hanging under list row `row`, if it has one.
+---'cursorline' cannot reach a virtual line, so `CursorLine` is baked into the
+---chunks plus width padding. Keyed by row in its own namespace, since
+---`render_cursor` clears its namespace whole.
+---@param row integer 1-based
+---@param cursor boolean whether the row is the one under the cursor
+---@return nil
+function Picker:_render_virt_line(row, cursor)
+	local item = self.list_items[row]
+	if not item or not item.virt_line or #item.virt_line == 0 then return end
+
+	local chunks = { { _LIST_PREFIX }, { "╰─ ", "NonText" } }
+	vim.list_extend(chunks, item.virt_line)
+	if cursor then
+		local width = 0
+		for i = 1, #chunks do
+			local text, hl = chunks[i][1], chunks[i][2]
+			width = width + vim.fn.strdisplaywidth(text)
+			-- Stacked lowest priority first: the chunk's own group keeps its
+			-- colours and only falls back to the cursor line's background.
+			chunks[i] = { text, hl and { "CursorLine", hl } or "CursorLine" }
+		end
+		local pad = self.layout.list_width - width
+		if pad > 0 then chunks[#chunks + 1] = { string.rep(" ", pad), "CursorLine" } end
+	end
+
+	vim.api.nvim_buf_set_extmark(self.lbuf, _NS_VLINE, row - 1, 0, {
+		id         = row,
+		virt_lines = { chunks },
+		hl_mode    = "blend",
+	})
 end
 
 ---@return integer?
@@ -1205,6 +1246,8 @@ function Picker:clear_list()
 	end
 
 	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
+	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_VLINE, 0, -1)
+	self._vline_row = nil
 	self:request_clear_preview()
 	self:render_cursor()
 	self:render_position()
@@ -1251,11 +1294,9 @@ function Picker:set_items(items)
 	vim.bo[self.lbuf].modifiable = true
 	vim.api.nvim_buf_set_lines(self.lbuf, 0, -1, false, lines)
 	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
-
-	-- Highlighting is a second pass because an extmark needs its line to exist
-	-- first. It reads the chunks again rather than carrying a description of
-	-- each mark over from the pass above: at ten thousand rows a keystroke, that
-	-- description is two throwaway tables per highlighted chunk.
+	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_VLINE, 0, -1)
+	self._vline_row = nil
+	-- virt lines
 	for row_idx = 1, count do
 		local item   = items[row_idx]
 		local row    = row_idx - 1
@@ -1277,18 +1318,7 @@ function Picker:set_items(items)
 			end
 		end
 
-		local vlines
-		if item.virt_line and #item.virt_line > 0 then
-			local vl = { { prefix }, { "╰─ ", "NonText" } }
-			vim.list_extend(vl, item.virt_line)
-			vlines = { vl }
-		end
-		if vlines then
-			vim.api.nvim_buf_set_extmark(self.lbuf, _NS_CONTENT, row, 0, {
-				virt_lines = vlines,
-				hl_mode    = "blend",
-			})
-		end
+		self:_render_virt_line(row_idx, false)
 	end
 
 	vim.bo[self.lbuf].modifiable = false
