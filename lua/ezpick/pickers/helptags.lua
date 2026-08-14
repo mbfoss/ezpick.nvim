@@ -7,6 +7,21 @@ local pickertools = require("ezpick.base.pickertools")
 --- tail of a fuzzy ranking is ever worth.
 local _MAX_ITEMS  = 1000
 
+--- Does `file` satisfy the `--file` filter? Each value is a case-insensitive
+--- substring, so `--file opt` finds options.txt. Repeats widen rather than
+--- narrow: a tag belongs to exactly one file, so requiring it to match every
+--- value could only ever match the values that are substrings of one another.
+---@param file string Basename of the tag's help file.
+---@param wanted string[]
+---@return boolean
+local function _in_files(file, wanted)
+    local lower = file:lower()
+    for _, want in ipairs(wanted) do
+        if lower:find(want:lower(), 1, true) then return true end
+    end
+    return false
+end
+
 --- Strip the punctuation tags wrap names in (`'scroll'`, `<ScrollWheelUp>`). To
 --- `matchfuzzypos` that leading punctuation is unmatched text, so `'scrolloff'`
 --- scores as a mid-string hit and sinks below `hl-Scrollbar`; matching the name
@@ -100,26 +115,53 @@ function M.spec()
     -- back onto the decorated tag. Needs `matchfuzzypos`' dict form: undecorating
     -- is not injective (`scroll` and `'scroll'` collapse), so a returned string
     -- alone could not be traced back to its tag.
-    ---@type { name: string, tag: string, offset: integer }[]
+    ---@type { name: string, tag: string, offset: integer, file: string }[]
     local candidates = {}
+    ---Basenames offered to `--file` completion, deduplicated and sorted.
+    local files      = {}
     for i, tag in ipairs(tags) do
         local name, offset = _undecorate(tag:lower())
-        candidates[i] = { name = name, tag = tag, offset = offset }
+        local file         = vim.fs.basename(index[tag].file)
+        candidates[i]      = { name = name, tag = tag, offset = offset, file = file }
+        files[file]        = true
     end
+    files = vim.tbl_keys(files)
+    table.sort(files)
+
+    -- Built here rather than at module scope: the values are whatever help files
+    -- this runtimepath turned out to carry. Not `strict` -- the values are
+    -- complete basenames, but a substring of one is a legitimate way to write the
+    -- filter, and strictness would hint against every such value.
+    ---@type ezpick.queryflags.FlagDef[]
+    local flag_schema = {
+        { name = "file", type = "value", multi = true, values = files, alias = { "source" }, desc = "filter by help file" },
+    }
 
     return {
         prompt         = "Help Tags",
         enable_preview = true,
         previewer      = make_previewer(index),
-        finder         = function(query, _, _, callback)
+        flags          = flag_schema,
+        finder         = function(query, flags, _, callback)
+            -- Narrowed before matching so the score ranks what survives, and so
+            -- `_MAX_ITEMS` spends its rows on the requested file rather than on
+            -- better-scoring tags from files the filter excludes.
+            local pool = candidates
+            if flags.file then
+                pool = {}
+                for _, cand in ipairs(candidates) do
+                    if _in_files(cand.file, flags.file) then pool[#pool + 1] = cand end
+                end
+            end
+
             -- Help tag lists run to tens of thousands of entries, so they are
             -- matched in a single batched `matchfuzzypos` (which also ranks them)
             -- instead of one call per tag.
             local matched, positions, scores
             if query == "" then
-                matched = candidates
+                matched = pool
             else
-                local result = vim.fn.matchfuzzypos(candidates, (_undecorate(query:lower())),
+                local result = vim.fn.matchfuzzypos(pool, (_undecorate(query:lower())),
                     { key = "name" })
                 matched, positions, scores = result[1], result[2], result[3]
             end
