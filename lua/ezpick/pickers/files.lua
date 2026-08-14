@@ -172,7 +172,7 @@ local function async_lua_search(query, opts, fetch_opts, callback)
     local globs              = mode == "glob" and split_globs(query) or nil
 
     local base_excludes      = opts.show_hidden and {} or { ".*", "**/.*" }
-    local exclude_regex_list = strutil.compile_globs(base_excludes)
+    local exclude_regex_list = vim.tbl_map(strutil.compile_glob, base_excludes)
 
     local aborted            = false
     local walk_cancel ---@type fun()?

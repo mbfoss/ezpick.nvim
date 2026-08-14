@@ -316,6 +316,20 @@ local function build_rg_dir_cmd(parsed)
     return vim.list_extend({ "rg" }, args)
 end
 
+--- Compile a glob list, dropping any that fail (the prompt is compiled on every
+--- keystroke, so half-typed globs are expected). nil when nothing compiled, so
+--- a transient bad glob does not filter everything out.
+---@param globs string[]
+---@return vim.regex[]?
+local function compile_globs(globs)
+    local out = {}
+    for _, g in ipairs(globs) do
+        local re = strutil.compile_glob(g)
+        if re then out[#out + 1] = re end
+    end
+    return #out > 0 and out or nil
+end
+
 --- Split a flag-glob list ("*.lua", "!*_spec.lua") into compiled include/exclude
 --- regexes. rg's own `-g` only filters disk traversal, not stdin input, so open
 --- buffers are filtered in-process instead.
@@ -330,8 +344,7 @@ local function compile_filter_globs(filters)
             include[#include + 1] = g
         end
     end
-    return (#include > 0 and strutil.compile_globs(include) or nil),
-        (#exclude > 0 and strutil.compile_globs(exclude) or nil)
+    return compile_globs(include), compile_globs(exclude)
 end
 
 --- Same idea for `--type`: rg's own `-t` filters files it walks, not stdin, so
@@ -352,8 +365,7 @@ local function compile_type_globs(types)
             target[#target + 1] = g
         end
     end
-    return (#include > 0 and strutil.compile_globs(include) or nil),
-        (#exclude > 0 and strutil.compile_globs(exclude) or nil)
+    return compile_globs(include), compile_globs(exclude)
 end
 
 ---@class ezpick.livegrep.OpenBuf

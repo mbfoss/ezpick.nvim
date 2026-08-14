@@ -258,14 +258,18 @@ function M.create_line_buffered_feed(callback)
 	end
 end
 
----@param globs string[]
----@return vim.regex[]
-function M.compile_globs(globs)
-	local compiled = {}
-	for _, g in ipairs(globs) do
-		table.insert(compiled, vim.regex(vim.fn.glob2regpat(g)))
+--- Invalid globs (e.g. a half-typed `*.{lua`) return nil plus the error rather
+--- than raising; callers compile globs from live user input.
+---@param glob string
+---@return vim.regex? regex, string? err
+function M.compile_glob(glob)
+	local ok, res = pcall(function()
+		return vim.regex(vim.fn.glob2regpat(glob))
+	end)
+	if not ok then
+		return nil, tostring(res)
 	end
-	return compiled
+	return res
 end
 
 ---@param str string
