@@ -7,6 +7,19 @@ local pickertools = require("ezpick.base.pickertools")
 --- tail of a fuzzy ranking is ever worth.
 local _MAX_ITEMS  = 1000
 
+--- Strip the punctuation tags wrap names in (`'scroll'`, `<ScrollWheelUp>`). To
+--- `matchfuzzypos` that leading punctuation is unmatched text, so `'scrolloff'`
+--- scores as a mid-string hit and sinks below `hl-Scrollbar`; matching the name
+--- earns Vim's start-of-string and exact bonuses instead. Outer edges only, so
+--- `i_<S-ScrollWheelUp>` keeps its mode prefix. Also applied to the query.
+---@param str string
+---@return string name The undecorated name.
+---@return integer offset Bytes removed from the front.
+local function _undecorate(str)
+    local stripped = str:gsub("^[^%w]+", "")
+    return (stripped:gsub("[^%w]+$", "")), #str - #stripped
+end
+
 --- Index of `:help` tags -> { help file, in-file anchor }, parsed from the
 --- `doc/tags` files across the runtimepath (the same index `:help` consults).
 --- Each line reads `tag<tab>file<tab>/*tag*`; the anchor is the address with its
@@ -83,6 +96,17 @@ function M.spec()
     end
     table.sort(tags)
 
+    -- Matched against instead of `tags`, carrying the offset that maps positions
+    -- back onto the decorated tag. Needs `matchfuzzypos`' dict form: undecorating
+    -- is not injective (`scroll` and `'scroll'` collapse), so a returned string
+    -- alone could not be traced back to its tag.
+    ---@type { name: string, tag: string, offset: integer }[]
+    local candidates = {}
+    for i, tag in ipairs(tags) do
+        local name, offset = _undecorate(tag:lower())
+        candidates[i] = { name = name, tag = tag, offset = offset }
+    end
+
     return {
         prompt         = "Help Tags",
         enable_preview = true,
@@ -93,17 +117,21 @@ function M.spec()
             -- instead of one call per tag.
             local matched, positions, scores
             if query == "" then
-                matched = tags
+                matched = candidates
             else
-                local result = vim.fn.matchfuzzypos(tags, query:lower())
+                local result = vim.fn.matchfuzzypos(candidates, (_undecorate(query:lower())),
+                    { key = "name" })
                 matched, positions, scores = result[1], result[2], result[3]
             end
 
             local items = {}
             for i = 1, math.min(#matched, _MAX_ITEMS) do
-                local tag    = matched[i]
+                local tag    = matched[i].tag
+                -- Positions are 0-based into the name; the highlighter wants
+                -- 1-based columns into the tag as displayed.
+                local offset = matched[i].offset + 1
                 local chunks = pickertools.highlight_chunks(tag, positions and vim.tbl_map(
-                    function(p) return p + 1 end, positions[i]) or nil)
+                    function(p) return p + offset end, positions[i]) or nil)
                 table.insert(chunks, { "  " .. vim.fs.basename(index[tag].file), "Comment" })
                 ---@type ezpick.Picker.Item
                 table.insert(items, {
