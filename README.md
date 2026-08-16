@@ -86,7 +86,7 @@ An extra argument seeds the initial query:
 | `files` | Files under the cwd |
 | `config_files` | Files under `stdpath("config")` |
 | `recent_files` | The oldfiles list |
-| `live_grep` | ripgrep results, with optional search & replace |
+| `live_grep` | ripgrep results |
 | `buffer_lines` | Non-blank lines of the current buffer |
 | `buffers` | Loaded buffers |
 | `windows` | Open windows |
@@ -151,7 +151,7 @@ the query itself starts with one. Completion opens as you type (disable with
 
 Switches are written `--<name>`, filters `--<name> <value>` or
 `--<name>=<value>`; wrap a value in `"` if it contains spaces. The glued `=`
-form is the exact one: it can carry an empty value (`--replace=`) or a value
+form is the exact one: it can carry an empty value (`--filter=`) or a value
 that looks like a flag (`--dir=--x`). Names are matched loosely — `--no-ignore`,
 `--noignore` and `--NoIgnore` are the same flag.
 
@@ -174,7 +174,7 @@ even split with it.
 
 `files` accepts `--dir`, `--case`, `--mode` (`fuzzy`|`fixed`|`glob`),
 `--follow`, `--hidden`. `live_grep` accepts `--dir`, `--filter`, `--type`, `--case`,
-`--replace`, `--regex`, `--word`, `--line`, `--invert`, `--follow`, `--hidden`,
+`--regex`, `--word`, `--line`, `--invert`, `--follow`, `--hidden`,
 `--no-ignore`, `--max-depth`. `marks` accepts
 `--global` and `--buffer`, `registers` accepts `--empty`, and the symbol
 sources accept one boolean per LSP symbol kind (`--Function`, `--Class`, …),
@@ -184,7 +184,6 @@ several of which are OR'd together.
 :Pick files --hidden --dir ~/src
 :Pick live_grep --regex --filter *.lua fn%s+%w+
 :Pick live_grep --type lua --type !markdown --word setup
-:Pick live_grep --dir="~/my src" --replace= drop me   " delete every match
 :Pick live_grep --dir ~/src -- --hidden               " searches for "--hidden"
 ```
 

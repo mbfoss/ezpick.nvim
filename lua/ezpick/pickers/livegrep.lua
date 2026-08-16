@@ -15,7 +15,6 @@ local _MAX_WRITE_QUEUE = 1024 * 1024
 ---@class ezpick.rgutil.Submatch
 ---@field s    integer  -- 0-indexed byte start in the line
 ---@field e    integer  -- 0-indexed byte end (exclusive) in the line
----@field repl string?  -- rg-computed replacement text (nil unless --replace was used)
 
 ---@class ezpick.rgutil.Match
 ---@field path string
@@ -39,22 +38,17 @@ local function parse_match(line)
 
     local subs = {}
     for _, m in ipairs(data.submatches or {}) do
-        subs[#subs + 1] = {
-            s    = m.start,
-            e    = m["end"],
-            repl = m.replacement and m.replacement.text or nil,
-        }
+        subs[#subs + 1] = { s = m.start, e = m["end"] }
     end
 
     local col = (subs[1] and subs[1].s + 1) or 1
     return { path = path, lnum = data.line_number, col = col, text = text, subs = subs }
 end
 
----@param text      string
----@param subs      ezpick.rgutil.Submatch[]
----@param show_repl boolean?  -- render "old → new" diff chunks instead of a single highlighted match
+---@param text string
+---@param subs ezpick.rgutil.Submatch[]
 ---@return {[1]:string,[2]:string?}[]
-local function build_chunks(text, subs, show_repl)
+local function build_chunks(text, subs)
     local chunks = {}
     local last   = 1
     for _, sm in ipairs(subs) do
@@ -63,13 +57,7 @@ local function build_chunks(text, subs, show_repl)
         if s > last then
             chunks[#chunks + 1] = { text:sub(last, s - 1) }
         end
-        if show_repl and sm.repl then
-            if #sm.repl > 0 then
-                chunks[#chunks + 1] = { sm.repl, "IncSearch" }
-            end
-        else
-            chunks[#chunks + 1] = { text:sub(s, e), "EzPickMatch" }
-        end
+        chunks[#chunks + 1] = { text:sub(s, e), "EzPickMatch" }
         last = e + 1
     end
     if last <= #text then
@@ -81,7 +69,7 @@ end
 --- Strip surrounding whitespace for display, shifting the submatch offsets to
 --- match. Trimming never eats into a submatch (a query can match whitespace),
 --- so the highlighted spans stay exact. Display only — `data.subs` keeps the
---- original offsets, which replace-all applies to the untrimmed buffer line.
+--- original offsets into the untrimmed line.
 ---@param text string
 ---@param subs ezpick.rgutil.Submatch[]
 ---@return string text, ezpick.rgutil.Submatch[] subs
@@ -97,75 +85,9 @@ local function trim_for_display(text, subs)
 
     local shifted = {}
     for i, sm in ipairs(subs) do
-        shifted[i] = { s = sm.s - lead, e = sm.e - lead, repl = sm.repl }
+        shifted[i] = { s = sm.s - lead, e = sm.e - lead }
     end
     return text:sub(lead + 1, tail), shifted
-end
-
----@param text string
----@param subs ezpick.rgutil.Submatch[]
----@return string
-local function apply_subs(text, subs)
-    local parts = {}
-    local last  = 1
-    for _, sm in ipairs(subs) do
-        local s           = sm.s + 1
-        local e           = sm.e
-        parts[#parts + 1] = text:sub(last, s - 1)
-        parts[#parts + 1] = sm.repl or text:sub(s, e)
-        last              = e + 1
-    end
-    parts[#parts + 1] = text:sub(last)
-    return table.concat(parts)
-end
-
----@param items ezpick.Picker.Item[]
----@return integer total_occurrences, integer file_count
-local function count_matches(items)
-    local files = {}
-    local total = 0
-    for _, item in ipairs(items) do
-        local d = item.data
-        if d and d.filepath and d.subs then
-            files[d.filepath] = true
-            total             = total + #d.subs
-        end
-    end
-    return total, vim.tbl_count(files)
-end
-
----@param items ezpick.Picker.Item[]
-local function apply_replace_all(items)
-    local by_file = {}
-    local order   = {}
-    for _, item in ipairs(items) do
-        local d = item.data
-        if d and d.filepath and d.lnum and d.subs then
-            if not by_file[d.filepath] then
-                by_file[d.filepath] = {}
-                order[#order + 1]   = d.filepath
-            end
-            table.insert(by_file[d.filepath], { lnum = d.lnum, subs = d.subs })
-        end
-    end
-
-    for _, filepath in ipairs(order) do
-        local bufnr = vim.fn.bufadd(filepath)
-        vim.bo[bufnr].buflisted = true
-        vim.fn.bufload(bufnr)
-        for _, edit in ipairs(by_file[filepath]) do
-            local lnum = edit.lnum
-            if lnum >= 1 and lnum <= vim.api.nvim_buf_line_count(bufnr) then
-                local line = vim.api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1]
-                if line then
-                    local new_line = apply_subs(line, edit.subs)
-                    if new_line ~= line then
-                        vim.api.nvim_buf_set_lines(bufnr, lnum - 1, lnum, false, { new_line })
-                    end
-                end
-            end
-        end
-    end
 end
 
 ---@class ezpick.livegrep.opts
@@ -227,7 +149,6 @@ local FLAGS = {
     { name = "hidden",    type = "boolean", desc = "include hidden (dotfiles)" },
     { name = "no-ignore", type = "boolean", desc = "disable .gitignore / .ignore rules" },
     { name = "max-depth", type = "value",   desc = "max directory depth to descend" },
-    { name = "replace",   type = "value",   desc = "replacement text (--replace= deletes)" },
 }
 
 
@@ -273,11 +194,6 @@ local function build_rg_base(parsed)
 
     if flags.invert then
         table.insert(args, "--invert-match")
-    end
-
-    if flags.replace then
-        table.insert(args, "--replace")
-        table.insert(args, flags.replace)
     end
 
     return args
@@ -415,11 +331,10 @@ local _BUFFER_INDICATOR_WIDTH = vim.fn.strdisplaywidth(_BUFFER_INDICATOR)
 ---@param abs_path    string
 ---@param cwd         string
 ---@param path_width  integer
----@param show_repl   boolean?
 ---@param rel_path    string?  precomputed cwd-relative path (avoids recomputation)
 ---@param from_buffer boolean?  match came from an open buffer, not disk
 ---@return ezpick.Picker.Item
-local function make_item(m, abs_path, cwd, path_width, show_repl, rel_path, from_buffer)
+local function make_item(m, abs_path, cwd, path_width, rel_path, from_buffer)
     rel_path = rel_path or fsutil.get_relative_path(abs_path, cwd) or abs_path
     local indicator_width = from_buffer and _BUFFER_INDICATOR_WIDTH or 0
     local location = strutil.crop_for_ui(
@@ -433,7 +348,7 @@ local function make_item(m, abs_path, cwd, path_width, show_repl, rel_path, from
     virt_line[#virt_line + 1] = { location, "EzPickPath" }
     local shown_text, shown_subs = trim_for_display(m.text, m.subs)
     return {
-        label_chunks = build_chunks(shown_text, shown_subs, show_repl),
+        label_chunks = build_chunks(shown_text, shown_subs),
         virt_line    = virt_line,
         data         = { filepath = abs_path, lnum = m.lnum, col = m.col, subs = m.subs },
     }
@@ -483,7 +398,7 @@ end
 --------------------------------------------------------------------------------
 
 --- Build the rg command for the in-buffer search. Mirrors the disk flags (case,
---- fixed-strings, replace) but adds --line-buffered so matches stream out while
+--- fixed-strings) but adds --line-buffered so matches stream out while
 --- later buffers are still being fed, and targets `-` (stdin).
 ---@param parsed ezpick.queryflags.ParseResult
 ---@return string[] cmd
@@ -537,7 +452,6 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
         return
     end
 
-    local show_repl     = parsed.flags.replace ~= nil
     local max_results   = grep_opts.max_results or 10000
     local cwd           = grep_opts.cwd
     local path_width    = fetch_opts.virt_line_width
@@ -590,7 +504,7 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
         end
         for _, r in ipairs(recs) do
             merged[#merged + 1] =
-                make_item(r.m, r.abs_path, cwd, path_width, show_repl, r.rel_path, r.from_buffer)
+                make_item(r.m, r.abs_path, cwd, path_width, r.rel_path, r.from_buffer)
         end
         callback(merged)
     end
@@ -753,10 +667,7 @@ end
 ---@param opts ezpick.livegrep.opts?
 ---@return ezpick.PickerSpec
 function M.spec(opts)
-    opts              = opts or {}
-
-    local _last_items = {} ---@type ezpick.Picker.Item[]
-    local _replace_value ---@type string?
+    opts = opts or {}
 
     ---@type ezpick.PickerSpec
     return {
@@ -767,39 +678,15 @@ function M.spec(opts)
         finder         = function(query, flags, fetch_opts, callback)
             local parsed     = { query = query, flags = flags }
             local target_cwd = flags.dir and vim.fn.expand(flags.dir) or vim.fn.getcwd()
-            _replace_value   = flags.replace
             return async_grep(parsed, {
                 cwd         = target_cwd,
                 max_results = opts.max_results or 10000,
-            }, fetch_opts, function(items)
-                _last_items = items or {}
-                callback(items)
-            end)
+            }, fetch_opts, callback)
         end,
         on_confirm     = function(data)
             if not data then return end
-            if _replace_value then
-                local total, file_count = count_matches(_last_items)
-                if total == 0 then return end
-                ui.confirm_action(
-                    string.format("Replace %d occurrence(s) across %d file(s)?", total, file_count),
-                    false,
-                    function(confirmed)
-                        if not confirmed then return end
-                        apply_replace_all(_last_items)
-                        vim.notify(
-                            string.format(
-                                "Replaced %d occurrence(s) in %d file(s) (buffers modified, not saved)",
-                                total, file_count
-                            ),
-                            vim.log.levels.INFO
-                        )
-                    end
-                )
-            else
-                if data.filepath and data.lnum and data.col then
-                    ui.smart_open_file(data.filepath, data.lnum, data.col - 1)
-                end
+            if data.filepath and data.lnum and data.col then
+                ui.smart_open_file(data.filepath, data.lnum, data.col - 1)
             end
         end,
     }
