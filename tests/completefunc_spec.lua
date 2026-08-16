@@ -74,9 +74,16 @@ describe("picker completefunc", function()
         assert.are.same({}, picker._flag_completefunc(0, "wor").words)
     end)
 
-    it("matches a quoted candidate against an unquoted leader", function()
+    it("matches an escaped candidate against an unescaped leader", function()
         local _, words = complete("--dir with", "with")
-        assert.are.same({ '"with space"' }, words)
+        assert.are.same({ "with\\ space" }, words)
+    end)
+
+    it("matches an escaped candidate against a leader written with escapes", function()
+        -- The leader is the whole value token, escapes and all, and a '\' still
+        -- waiting on its character must not drop the candidate it is leading to.
+        assert.are.same({ "with\\ space" }, select(2, complete("--dir with\\ sp", "with\\ sp")))
+        assert.are.same({ "with\\ space" }, select(2, complete("--dir with\\", "with\\")))
     end)
 
     it("asks to be called again on every keystroke", function()
@@ -170,11 +177,12 @@ describe("picker query hints", function()
 
     after_each(function() vim.cmd("silent! close!") end)
 
-    it("keeps searching through an unfinished quote", function()
-        -- The moment between the two quotes must not empty the list.
-        local query, flags = type_query('--dir "My Doc')
+    it("keeps searching through an unfinished escape", function()
+        -- The moment between the '\' and the character it escapes must not empty
+        -- the list.
+        local query, flags = type_query("--dir My\\")
         assert.are.equal("", query)
-        assert.are.equal("My Doc", flags.dir)
+        assert.are.equal("My", flags.dir)
     end)
 
     it("keeps complaining about a value slot the rest of the line has closed", function()
@@ -192,12 +200,12 @@ describe("picker query hints", function()
         -- through them turns the prompt into a stream of complaints.
         assert.is_nil(select(3, type_query("--dir")))
         assert.is_nil(select(3, type_query("--dir ")))
-        assert.is_nil(select(3, type_query('--dir "My Doc')))
+        assert.is_nil(select(3, type_query("--dir My\\")))
         assert.is_nil(select(3, type_query("--case sm")))
     end)
 
     it("speaks up once the cursor leaves what it points at", function()
-        assert.is_truthy(select(3, type_query('--dir "My Doc', 2)):find('unclosed "', 1, true))
+        assert.is_truthy(select(3, type_query("--dir My\\", 2)):find("trailing \\", 1, true))
         assert.is_truthy(select(3, type_query("--case sm x")):find("smart|on|off", 1, true))
     end)
 

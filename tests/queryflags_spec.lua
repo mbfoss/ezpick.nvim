@@ -66,10 +66,10 @@ describe("queryflags query", function()
         assert.are.equal("hello --fixed world", r.query)
     end)
 
-    it("leaves quotes in the query literal", function()
-        local r = qf.parse(schema, '--fixed "foo bar" baz')
+    it("leaves quotes and backslashes in the query literal", function()
+        local r = qf.parse(schema, '--fixed "foo\\ bar" baz')
         assert.is_true(r.flags.fixed)
-        assert.are.equal('"foo bar" baz', r.query)
+        assert.are.equal('"foo\\ bar" baz', r.query)
     end)
 
     it("yields an empty query when only flags are present", function()
@@ -115,7 +115,7 @@ describe("queryflags literal separator", function()
     end)
 
     it("parses flags written before it", function()
-        local r = qf.parse(schema, '--path "foo bar" --fixed -- --path hello')
+        local r = qf.parse(schema, "--path foo\\ bar --fixed -- --path hello")
         assert.are.equal("foo bar", r.flags.path)
         assert.is_true(r.flags.fixed)
         assert.are.equal("--path hello", r.query)
@@ -200,11 +200,6 @@ describe("queryflags value flags", function()
         assert.are.equal("here", r.query)
     end)
 
-    it("keeps an explicitly empty quoted value", function()
-        local r = qf.parse(schema, '--repl "" here')
-        assert.are.equal("", r.flags.repl)
-        assert.are.equal("here", r.query)
-    end)
 
     it("does not swallow a following flag as its value", function()
         local r = qf.parse(schema, "--path --fixed")
@@ -225,10 +220,16 @@ describe("queryflags value flags", function()
         assert.is_nil(r.flags.fixed)
     end)
 
-    it("takes a flag-looking value when it is quoted", function()
-        local r = qf.parse(schema, '--path "--fixed"')
+    it("takes a flag-looking value when its dash is escaped", function()
+        local r = qf.parse(schema, "--path \\--fixed")
         assert.are.equal("--fixed", r.flags.path)
         assert.is_nil(r.flags.fixed)
+    end)
+
+    it("takes an escaped separator as a value", function()
+        local r = qf.parse(schema, "--path \\-- foo")
+        assert.are.equal("--", r.flags.path)
+        assert.are.equal("foo", r.query)
     end)
 
     it("stays unset when nothing follows", function()
@@ -237,52 +238,49 @@ describe("queryflags value flags", function()
         assert.is_not_nil(hint_of(r, "missing-value"))
     end)
 
-    it("parses a double-quoted value with spaces", function()
-        local r = qf.parse(schema, '--path "foo bar" rest')
+    it("parses a value whose spaces are escaped", function()
+        local r = qf.parse(schema, "--path foo\\ bar rest")
         assert.are.equal("foo bar", r.flags.path)
         assert.are.equal("rest", r.query)
     end)
 
-    it("parses a double-quoted value glued on with =", function()
-        local r = qf.parse(schema, '--path="foo bar" rest')
+    it("parses an escaped value glued on with =", function()
+        local r = qf.parse(schema, "--path=foo\\ bar rest")
         assert.are.equal("foo bar", r.flags.path)
         assert.are.equal("rest", r.query)
     end)
 
-    it("treats single quotes as literal characters", function()
-        local r = qf.parse(schema, "--path 'foo")
-        assert.are.equal("'foo", r.flags.path)
+    it("treats quotes as literal characters", function()
+        local r = qf.parse(schema, "--path \"foo 'bar")
+        assert.are.equal('"foo', r.flags.path)
+        assert.are.equal("'bar", r.query)
     end)
 
-    it("inserts a literal double quote inside a quoted value via \\\"", function()
-        local r = qf.parse(schema, '--path "foo \\"bar\\" baz"')
-        assert.are.equal('foo "bar" baz', r.flags.path)
+    it("inserts a literal backslash via \\\\", function()
+        local r = qf.parse(schema, "--path a\\\\b c")
+        assert.are.equal("a\\b", r.flags.path)
+        assert.are.equal("c", r.query)
     end)
 
-    it("only opens a quote at the start of the value", function()
-        local r = qf.parse(schema, '--path foo"bar baz')
-        assert.are.equal('foo"bar', r.flags.path)
-        assert.are.equal("baz", r.query)
+    it("escapes any character, not just the special ones", function()
+        local r = qf.parse(schema, "--path fo\\o")
+        assert.are.equal("foo", r.flags.path)
     end)
 
-    it("keeps a backslash-quote outside a quoted value literal", function()
-        local r = qf.parse(schema, '--path foo\\"bar')
-        assert.are.equal('foo\\"bar', r.flags.path)
+    it("escapes anywhere in the value, not only at its start", function()
+        local r = qf.parse(schema, "--path foo\\ bar\\ baz q")
+        assert.are.equal("foo bar baz", r.flags.path)
+        assert.are.equal("q", r.query)
     end)
 
-    it("continues the value with text after the closing quote", function()
-        local r = qf.parse(schema, '--path "foo bar"baz')
-        assert.are.equal("foo barbaz", r.flags.path)
-    end)
-
-    it("does not treat -- inside a quoted value as a separator", function()
-        local r = qf.parse(schema, '--path "a -- b" c')
+    it("does not treat an escaped -- inside a value as a separator", function()
+        local r = qf.parse(schema, "--path a\\ --\\ b c")
         assert.are.equal("a -- b", r.flags.path)
         assert.are.equal("c", r.query)
     end)
 
     it("collects values for multi flags", function()
-        local r = qf.parse(schema, '--kind "a b" --kind=c --kind d q')
+        local r = qf.parse(schema, "--kind a\\ b --kind=c --kind d q")
         assert.are.same({ "a b", "c", "d" }, r.flags.kind)
         assert.are.equal("q", r.query)
     end)
@@ -291,10 +289,16 @@ end)
 describe("queryflags hints", function()
     it("keeps a usable query and flags beside every hint", function()
         -- nothing here may empty the result list: a hint is advice, not a stop.
-        local r = qf.parse(schema, '--fixed --path "My Doc')
+        local r = qf.parse(schema, "--fixed --path My\\")
         assert.is_true(r.flags.fixed)
-        assert.are.equal("My Doc", r.flags.path)
-        assert.is_not_nil(hint_of(r, "unclosed-quote"))
+        assert.are.equal("My", r.flags.path)
+        assert.is_not_nil(hint_of(r, "dangling-escape"))
+    end)
+
+    it("marks only the trailing backslash, not the value it sits on", function()
+        local h = assert(hint_of(qf.parse(schema, "--path My\\"), "dangling-escape"))
+        assert.are.equal(9, h.start)
+        assert.are.equal(10, h.finish)
     end)
 
     it("reports a typo'd flag as unknown", function()
@@ -478,30 +482,29 @@ describe("queryflags highlight", function()
         }, qf.highlight(schema, "--fixed -- --fixed --path foo"))
     end)
 
-    it("highlights the quotes delimiting a value", function()
-        local delimiters = {}
-        for _, h in ipairs(qf.highlight(schema, '--path "foo bar"')) do
-            if h.hl == "Delimiter" then table.insert(delimiters, h) end
+    it("dims the escaping backslashes in a value", function()
+        local escapes = {}
+        for _, h in ipairs(qf.highlight(schema, "--path foo\\ bar")) do
+            if h.hl == "NonText" then table.insert(escapes, h) end
         end
         assert.are.same({
-            { start = 7,  finish = 8,  hl = "Delimiter" },
-            { start = 15, finish = 16, hl = "Delimiter" },
-        }, delimiters)
+            { start = 10, finish = 11, hl = "NonText" },
+        }, escapes)
     end)
 
-    it("highlights the opening quote of an unterminated quote", function()
-        local delimiters = {}
-        for _, h in ipairs(qf.highlight(schema, '--path "foo ba')) do
-            if h.hl == "Delimiter" then table.insert(delimiters, h) end
+    it("dims a trailing backslash that escapes nothing", function()
+        local escapes = {}
+        for _, h in ipairs(qf.highlight(schema, "--path foo\\")) do
+            if h.hl == "NonText" then table.insert(escapes, h) end
         end
         assert.are.same({
-            { start = 7, finish = 8, hl = "Delimiter" },
-        }, delimiters)
+            { start = 10, finish = 11, hl = "NonText" },
+        }, escapes)
     end)
 
-    it("does not highlight quotes in query text", function()
-        for _, h in ipairs(qf.highlight(schema, '"--fixed"')) do
-            assert.is_true(h.hl ~= "Delimiter")
+    it("does not dim a backslash in query text", function()
+        for _, h in ipairs(qf.highlight(schema, "a\\ b")) do
+            assert.is_true(h.hl ~= "NonText")
         end
     end)
 end)
@@ -591,7 +594,7 @@ describe("queryflags completion", function()
         assert.is_nil(qf.get_completions(schema, "--path foo ", 11, true))
     end)
 
-    it("wraps a spaced value in quotes so it re-parses", function()
+    it("escapes the spaces in a candidate so it re-parses", function()
         local comps = qf.get_completions(schema, "--path foo", 10)
         assert.not_nil(comps)
         assert.are.equal(8, comps.startcol)
@@ -601,36 +604,27 @@ describe("queryflags completion", function()
             if item.abbr == "foo bar" then spaced = item end
         end
         assert.not_nil(spaced)
-        assert.are.equal('"foo bar"', spaced.word)
+        assert.are.equal("foo\\ bar", spaced.word)
         assert.are.equal("foo bar", qf.parse(schema, "--path " .. spaced.word).flags.path)
     end)
 
-    it("offers value completions while inside an open quote", function()
-        local line  = '--path "foo '
+    it("matches candidates against a partial written with escapes", function()
+        -- The escaped candidate keeps the typed prefix, so Vim's live pum filter
+        -- keeps it; the menu still shows the plain value.
+        local line  = "--path foo\\ b"
         local comps = qf.get_completions(schema, line, #line)
         assert.not_nil(comps)
-
-        local found = false
-        for _, item in ipairs(comps.items) do
-            if item.abbr == "foo bar" then found = true end
-        end
-        assert.is_true(found)
+        assert.are.equal(8, comps.startcol)
+        assert.are.same({ { word = "foo\\ bar", abbr = "foo bar" } }, comps.items)
     end)
 
-    it("quotes space-free candidates when inside an open quote", function()
-        -- Inside an open quote every candidate must carry the quote so it keeps
-        -- the typed `"` prefix; otherwise Vim's live pum filter drops them all.
-        local line  = '--path "f'
+    it("replaces a half-written escape rather than completing after it", function()
+        local line  = "--path fo\\"
         local comps = qf.get_completions(schema, line, #line)
         assert.not_nil(comps)
-
-        local plain
-        for _, item in ipairs(comps.items) do
-            if item.abbr == "foo" then plain = item end
-        end
-        assert.not_nil(plain)
-        assert.are.equal('"foo"', plain.word)
-        assert.are.equal("foo", qf.parse(schema, "--path " .. plain.word).flags.path)
+        assert.are.equal(8, comps.startcol)
+        assert.is_true(vim.tbl_contains(
+            vim.tbl_map(function(it) return it.word end, comps.items), "foo"))
     end)
 end)
 

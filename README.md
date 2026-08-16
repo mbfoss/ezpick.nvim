@@ -144,16 +144,16 @@ Inside a picker, `g?` shows the full list:
 ### Query flags
 
 Sources can accept inline flags in the query. **Flags go first**; everything
-from the first non-flag word onward is the query, verbatim — spaces, quotes and
-dashes in it are ordinary characters, so a flag name only needs escaping when
+from the first non-flag word onward is the query, verbatim — spaces, backslashes
+and dashes in it are ordinary characters, so a flag name only needs escaping when
 the query itself starts with one. Completion opens as you type (disable with
 `auto_complete_flags`).
 
 Switches are written `--<name>`, filters `--<name> <value>` or
-`--<name>=<value>`; wrap a value in `"` if it contains spaces. The glued `=`
-form is the exact one: it can carry an empty value (`--filter=`) or a value
-that looks like a flag (`--dir=--x`). Names are matched loosely — `--no-ignore`,
-`--noignore` and `--NoIgnore` are the same flag.
+`--<name>=<value>`; escape with `\` to put a space (or a backslash) in a value —
+`--dir my\ src`. The glued `=` form is the exact one: it can carry an empty value
+(`--filter=`) or a value that looks like a flag (`--dir=--x`). Names are matched
+loosely — `--no-ignore`, `--noignore` and `--NoIgnore` are the same flag.
 
 A switch is set by being written, so it takes no value at all: `--hidden=false`
 and `--hidden=true` are the same mistake, and both leave the switch alone rather
@@ -162,8 +162,8 @@ than guess which reading was meant.
 A standalone `--` ends the flagged section, for the one case that needs it: a
 query starting with a flag name.
 
-Mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, an
-unfinished quote or a flag written after the query gets an underline and a short
+Mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, a
+trailing `\` or a flag written after the query gets an underline and a short
 hint under the prompt, while the search keeps running on a best-effort reading. A
 hint about the flag the cursor is still inside waits until the cursor moves on,
 so writing one out correctly is silent.

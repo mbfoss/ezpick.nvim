@@ -54,7 +54,7 @@ tests/                   plenary busted specs
   `--<flag> <value>` / `--<flag>=<value>` section and the query, and drives flag
   completion. Flags come first and scanning stops at the first word that names
   none, so `ParseResult.query` is a verbatim slice from `query_start` — pickers
-  that grep for what was typed depend on that. Quoting is local to a value. A
+  that grep for what was typed depend on that. `\` escaping is local to a value. A
   standalone `--` ends the flagged section for a query that must start with a
   flag name. `parse` never fails on what was typed: anything doubtful comes back
   as an advisory `ParseResult.hints` entry beside a usable query, which the

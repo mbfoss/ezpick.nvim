@@ -119,10 +119,10 @@ local _HINT_ICON = "󰀪 "
 
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
-	["missing-value"]  = true,
-	["unclosed-quote"] = true,
-	["unknown-flag"]   = true,
-	["bad-value"]      = true,
+	["missing-value"]   = true,
+	["dangling-escape"] = true,
+	["unknown-flag"]    = true,
+	["bad-value"]       = true,
 }
 
 ---Whether the cursor is still in the span `hint` points at: it counts as inside
@@ -881,8 +881,8 @@ function Picker:_render_prompt_marks(query)
 	end
 
 	-- A hint about the span the cursor is still inside is a hint about
-	-- unfinished typing: half of "--dir" is a missing value and an opening quote
-	-- is an unclosed one, and saying so on the way through helps nobody. Those
+	-- unfinished typing: half of "--dir" is a missing value and a lone "\" is an
+	-- escape of nothing, and saying so on the way through helps nobody. Those
 	-- wait for the cursor to leave; a mistake that is already complete does not.
 	local cursor   = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
 	self._hint_col = cursor
@@ -1352,7 +1352,7 @@ function Picker:run_fetch()
 
 	local clean_query, flags
 	if #self.opts.flags > 0 then
-		-- `parse` never refuses: a half-typed quote or an unknown flag yields a
+		-- `parse` never refuses: a half-typed escape or an unknown flag yields a
 		-- hint beside a best-effort query, so the list keeps up with the typing
 		-- instead of emptying at the first character of a mistake.
 		local parsed      = queryflags.parse(self.opts.flags, query_text)
@@ -1695,14 +1695,15 @@ function M._flag_completefunc(findstart, base)
 	-- get_completions returns a 1-indexed byte column; completefunc wants 0-indexed.
 	if findstart == 1 then return completions.startcol - 1 end
 
-	-- Keep only candidates matching what was typed since startcol. Quotes are
-	-- ignored so an unquoted partial still matches a quoted value (base
-	-- `lang:fo` matches word `lang:"foo bar"`).
-	local function unquoted(s) return (s:gsub("[\"']", "")) end
-	local needle = unquoted(base)
+	-- Keep only candidates matching what was typed since startcol. Escapes are
+	-- resolved on both sides, so an unescaped partial still matches an escaped
+	-- value (base `fo` or `foo\ b` matches word `foo\ bar`), and a '\' waiting on
+	-- the character it escapes matches what it is on the way to.
+	local function unescaped(s) return (s:gsub("\\(.)", "%1"):gsub("\\$", "")) end
+	local needle = unescaped(base)
 	local items  = {}
 	for _, item in ipairs(completions.items) do
-		if vim.startswith(unquoted(item.word), needle) then
+		if vim.startswith(unescaped(item.word), needle) then
 			items[#items + 1] = item
 		end
 	end

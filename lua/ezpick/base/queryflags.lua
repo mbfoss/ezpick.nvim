@@ -20,7 +20,7 @@ local M = {}
 ---| "duplicate-flag"   -- a single-valued flag given more than once
 ---| "missing-value"    -- a value flag with nothing to take
 ---| "bad-value"        -- a value outside a strict flag's `values`
----| "unclosed-quote"   -- a value quote that never closes
+---| "dangling-escape"  -- a trailing '\' with nothing left to escape
 ---| "unexpected-value" -- a value glued onto a switch
 
 ---A problem worth pointing out that is never worth refusing to search over:
@@ -54,26 +54,13 @@ local M = {}
 ---section, after which everything is literal text.
 local _PREFIX = "--"
 
----`vim.fn.getcompletion()` types whose candidates are path fragments: a
----completed value is often only a prefix of what the user is after, so its
----quote is left open for further typing.
----@type table<string, boolean>
-local _PATH_COMPLETE = {
-    dir = true,
-    dir_in_path = true,
-    file = true,
-    file_in_path = true,
-    runtime = true,
-    shellcmdline = true,
-}
-
 -- Syntax:
 --
 --   [--flag] [--flag value] [--flag=value] ... [--] <query, verbatim>
 --
 -- Flags come first. Scanning stops at the first token that does not name a
 -- known flag, and everything from there to the end of the line is the query,
--- byte for byte -- spaces, quotes and dashes inside it are ordinary characters.
+-- byte for byte -- spaces, backslashes and dashes in it are ordinary characters.
 -- That verbatim tail is the point of the ordering: a picker that greps for what
 -- was typed must receive exactly what was typed.
 --
@@ -89,14 +76,15 @@ local _PATH_COMPLETE = {
 -- naming a known flag is not swallowed as a value -- '--dir --hidden' is a
 -- forgotten value, not a directory called "--hidden".
 --
--- Quoting (via ") applies only to a value, and only when the opening quote is
--- its first character. It lets the value contain spaces:
---   '--path "foo bar"'  → path = 'foo bar'
---   '--path="foo bar"'  → path = 'foo bar'
--- Inside a quoted value a literal double quote is written as \". Text after the
--- closing quote continues the value ('--path "foo bar"baz' → "foo barbaz"). An
--- unterminated quote is reported as a hint but still parsed, so results keep
--- coming while the closing quote is still being typed.
+-- Escaping (via \) applies only to a value, anywhere in it: a '\' is dropped
+-- and the character behind it is taken literally, which is how a value carries
+-- a space or a backslash of its own:
+--   '--path foo\ bar'   → path = 'foo bar'
+--   '--path=foo\ bar'   → path = 'foo bar'
+--   '--path a\\b'       → path = 'a\b'
+-- Quotes have no meaning here: '--path "foo' is the value '"foo'. A trailing
+-- '\' with nothing left to escape is reported as a hint but still parsed, so
+-- results keep coming while the escaped character is still being typed.
 --
 -- Because the query is whatever follows the flags, a flag name only needs
 -- escaping when the query *starts* with one. A standalone "--" ends the flagged
@@ -104,15 +92,15 @@ local _PATH_COMPLETE = {
 --   '-- --hidden'  → query '--hidden'
 --
 ---@class ezpick.queryflags.Piece
----@field kind    "flag"|"value"|"separator"
----@field start   integer                        -- 1-indexed start in source
----@field finish  integer                        -- 1-indexed finish in source (inclusive)
----@field name    string?                        -- canonical flag this piece names (kind="flag") or feeds (kind="value")
----@field typed   string?                        -- how that flag was actually spelled here, which `name` may only be a synonym of
----@field text    string?                        -- decoded value, quotes and escapes resolved (kind="value")
----@field eq      integer?                       -- 1-indexed position of the '=' gluing a value on (kind="flag")
----@field quote   {open:integer,close:integer?}? -- 1-indexed positions of the value quote chars; close=nil when unterminated
----@field escapes integer[]?                     -- 1-indexed position of each escaping '\' (the '\' of a \" inside a quoted value)
+---@field kind     "flag"|"value"|"separator"
+---@field start    integer     -- 1-indexed start in source
+---@field finish   integer     -- 1-indexed finish in source (inclusive)
+---@field name     string?     -- canonical flag this piece names (kind="flag") or feeds (kind="value")
+---@field typed    string?     -- how that flag was actually spelled here, which `name` may only be a synonym of
+---@field text     string?     -- decoded value, escapes resolved (kind="value")
+---@field eq       integer?    -- 1-indexed position of the '=' gluing a value on (kind="flag")
+---@field escapes  integer[]?  -- 1-indexed position of each '\' that escaped a character
+---@field dangling integer?    -- 1-indexed position of a trailing '\' that escaped nothing
 
 ---Lookup key for a flag name: the form in which two spellings of the same flag
 ---are equal. Case and the word separators '-' and '_' carry no meaning, so a
@@ -153,7 +141,7 @@ local function _dashed_name(str, i)
 end
 
 ---Read a value starting at `i`: a whitespace-delimited run, except that a
----double quote opening it makes whitespace literal until the quote closes.
+---backslash escapes the character behind it, making whitespace literal.
 ---@param str string
 ---@param i   integer
 ---@return ezpick.queryflags.Piece piece, integer next_i
@@ -162,34 +150,22 @@ local function _read_value(str, i)
     local tok_start = i
     local chars     = {}
     local escapes   = {}
-    ---@type {open:integer, close:integer?}?
-    local quote     = nil
-    local in_quote  = false
-
-    if str:sub(i, i) == '"' then
-        quote    = { open = i }
-        in_quote = true
-        i        = i + 1
-    end
+    ---@type integer?
+    local dangling  = nil
 
     while i <= len do
         local c = str:sub(i, i)
-        if in_quote then
-            -- Inside the quote whitespace is literal, the delimiting quote chars
-            -- are dropped from the decoded text, and \" is a literal double
-            -- quote that does not close the span.
-            if c == "\\" and str:sub(i + 1, i + 1) == '"' then
-                escapes[#escapes + 1] = i
-                chars[#chars + 1]     = '"'
-                i                     = i + 2
-            elseif c == '"' then
-                assert(quote)
-                quote.close = i
-                in_quote    = false
-                i           = i + 1
+        if c == "\\" then
+            if i == len then
+                -- Nothing left to escape: reported, not repaired. Dropping the
+                -- '\' keeps the value usable ('--dir My\' → "My") so the result
+                -- list survives the moment between the pair being typed.
+                dangling = i
+                i        = i + 1
             else
-                chars[#chars + 1] = c
-                i                 = i + 1
+                escapes[#escapes + 1] = i
+                chars[#chars + 1]     = str:sub(i + 1, i + 1)
+                i                     = i + 2
             end
         elseif c:match("%s") then
             break
@@ -199,16 +175,13 @@ local function _read_value(str, i)
         end
     end
 
-    -- An unterminated quote is reported, not repaired: dropping it keeps the
-    -- value usable ('--dir "My Doc' → "My Doc") so the result list survives the
-    -- moment between the two quotes being typed.
     return {
-        kind    = "value",
-        start   = tok_start,
-        finish  = i - 1,
-        text    = table.concat(chars),
-        quote   = quote,
-        escapes = #escapes > 0 and escapes or nil,
+        kind     = "value",
+        start    = tok_start,
+        finish   = i - 1,
+        text     = table.concat(chars),
+        escapes  = #escapes > 0 and escapes or nil,
+        dangling = dangling,
     }, i
 end
 
@@ -369,12 +342,12 @@ function M.parse(schema, raw)
             -- A value is only ever pushed right behind the flag it feeds.
             local flag  = assert(last_flag)
 
-            if piece.quote and not piece.quote.close then
+            if piece.dangling then
                 hints[#hints + 1] = {
-                    kind   = "unclosed-quote",
-                    start  = piece.quote.open - 1,
+                    kind   = "dangling-escape",
+                    start  = piece.dangling - 1,
                     finish = piece.finish,
-                    msg    = 'unclosed "',
+                    msg    = "trailing \\",
                 }
             end
 
@@ -459,34 +432,24 @@ function M.highlight(schema, raw)
         local e0 = piece.finish
 
         if piece.kind == "separator" then
-            table.insert(hls, { start = s0, finish = e0, hl = "Delimiter" })
+            table.insert(hls, { start = s0, finish = e0, hl = "@tag.delimiter" })
         elseif piece.kind == "flag" then
             -- `finish` spans a glued value too; the name alone is the keyword.
             local name_end = piece.eq and (piece.eq - 1) or piece.finish
-            table.insert(hls, { start = s0, finish = name_end, hl = "Keyword" })
+            table.insert(hls, { start = s0, finish = name_end, hl = "@keyword" })
             if piece.eq then
-                table.insert(hls, { start = piece.eq - 1, finish = piece.eq, hl = "Delimiter" })
+                table.insert(hls, { start = piece.eq - 1, finish = piece.eq, hl = "@tag.delimiter" })
             end
         elseif e0 > s0 then
-            table.insert(hls, { start = s0, finish = e0, hl = "String" })
+            table.insert(hls, { start = s0, finish = e0, hl = "@string" })
         end
 
-        -- The quote chars delimiting a value (--path "foo bar") are syntax:
-        -- highlight them as such. An unterminated quote still highlights its
-        -- opening char so the open span is visible. Inserted last so they win
-        -- over String/Keyword.
-        local q = piece.quote
-        if q then
-            table.insert(hls, { start = q.open - 1, finish = q.open, hl = "Delimiter" })
-            if q.close then
-                table.insert(hls, { start = q.close - 1, finish = q.close, hl = "Delimiter" })
-            end
-        end
-
-        -- The '\' of an escaped quote (\") is syntax, not content: dim it so the
-        -- quote it protects still reads as a literal character.
+        -- An escaping '\' is syntax, use a special highlight
         for _, pos in ipairs(piece.escapes or {}) do
-            table.insert(hls, { start = pos - 1, finish = pos, hl = "NonText" })
+            table.insert(hls, { start = pos - 1, finish = pos, hl = "@string.escape" })
+        end
+        if piece.dangling then
+            table.insert(hls, { start = piece.dangling - 1, finish = piece.dangling, hl = "@string.escape" })
         end
     end
 
@@ -496,24 +459,18 @@ function M.highlight(schema, raw)
 end
 
 ---Candidates for the value of `def`, as completion items replacing the whole
----value token. A value is quoted when it contains a space, or when the cursor
----already sits inside an open quote -- otherwise the unquoted candidates would
----not share the typed `"` prefix and Vim's live pum filter would drop them all.
----@param def      ezpick.queryflags.FlagDef
----@param partial  string  -- value text typed so far, unquoted and unescaped
----@param in_quote boolean -- the cursor sits inside an unterminated value quote
+---value token. The inserted word is escaped so it re-parses as the candidate it
+---names; the menu shows the plain text. Escaping is what the typed value uses
+---too, so an escaped candidate still shares the typed prefix and Vim's live pum
+---filter keeps it.
+---@param def     ezpick.queryflags.FlagDef
+---@param partial string  -- value text typed so far, unescaped
 ---@return table[]
-local function _value_items(def, partial, in_quote)
+local function _value_items(def, partial)
     local items = {}
 
-    -- `open_ended` candidates (paths) keep the quote open so the value can be
-    -- extended -- completing a directory is usually a step towards a deeper
-    -- path, and a closing quote would sit in the way.
-    local function add(v, open_ended)
-        local word = (in_quote or v:find('[%s"]'))
-            and ('"' .. v:gsub('"', '\\"') .. (open_ended and "" or '"'))
-            or v
-        table.insert(items, { word = word, abbr = v })
+    local function add(v)
+        table.insert(items, { word = (v:gsub("[\\%s]", "\\%0")), abbr = v })
     end
 
     for _, v in ipairs(def.values or {}) do
@@ -521,16 +478,15 @@ local function _value_items(def, partial, in_quote)
     end
 
     if def.complete then
-        local cands, open_ended
+        local cands
         if type(def.complete) == "function" then
             cands = def.complete(partial)
         else
-            open_ended = _PATH_COMPLETE[def.complete] or false
             -- getcompletion already filters by `partial`; trust its output.
             local ok, res = pcall(vim.fn.getcompletion, partial, def.complete)
             cands = ok and res or nil
         end
-        for _, v in ipairs(cands or {}) do add(v, open_ended) end
+        for _, v in ipairs(cands or {}) do add(v) end
     end
 
     return items
@@ -580,20 +536,19 @@ function M.get_completions(schema, line, cursor_byte, auto)
     -- Case 1: on the value of a value flag -- either typing it, or sitting in
     -- the empty slot right after the flag's name. A value is all that can be
     -- written here, so nothing else is offered.
-    local value_def, partial, in_quote
+    local value_def, partial, value_start
     if last and last.kind == "value" and last.finish == #before then
-        value_def = defs[_key(last.name)]
-        in_quote  = last.quote ~= nil and last.quote.close == nil
-        partial   = last.text
+        -- The whole token is replaced, escapes and all: a half-written escape is
+        -- part of the value being completed, not something to complete after.
+        value_def, partial, value_start = defs[_key(last.name)], assert(last.text), last.start
     elseif pending then
-        value_def, partial, in_quote = pending, "", false
+        value_def, partial, value_start = pending, "", #before + 1
     end
 
     if value_def then
         if not (value_def.values or value_def.complete) then return nil end
-        local startcol = (partial ~= "" or in_quote) and last.start or #before + 1
-        local items    = _value_items(value_def, partial, in_quote)
-        return #items > 0 and { startcol = startcol, items = items } or nil
+        local items = _value_items(value_def, partial)
+        return #items > 0 and { startcol = value_start, items = items } or nil
     end
 
     -- Case 2: a flag name. Only the word the flags could still extend to is
