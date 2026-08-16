@@ -20,7 +20,6 @@ local M = {}
 ---| "duplicate-flag"   -- a single-valued flag given more than once
 ---| "missing-value"    -- a value flag with nothing to take
 ---| "bad-value"        -- a value outside a strict flag's `values`
----| "dangling-escape"  -- a trailing '\' with nothing left to escape
 ---| "unexpected-value" -- a value glued onto a switch
 
 ---A problem worth pointing out that is never worth refusing to search over:
@@ -76,15 +75,17 @@ local _PREFIX = "--"
 -- naming a known flag is not swallowed as a value -- '--dir --hidden' is a
 -- forgotten value, not a directory called "--hidden".
 --
--- Escaping (via \) applies only to a value, anywhere in it: a '\' is dropped
--- and the character behind it is taken literally, which is how a value carries
--- a space or a backslash of its own:
+-- Escaping (via \) applies only to a value, anywhere in it, by Neovim's own
+-- rule for command arguments (:h <f-args>): '\\' is one backslash, '\' before
+-- whitespace is that whitespace as an ordinary character, and a '\' before
+-- anything else -- including the end of the line -- is left exactly as written.
 --   '--path foo\ bar'   → path = 'foo bar'
 --   '--path=foo\ bar'   → path = 'foo bar'
 --   '--path a\\b'       → path = 'a\b'
--- Quotes have no meaning here: '--path "foo' is the value '"foo'. A trailing
--- '\' with nothing left to escape is reported as a hint but still parsed, so
--- results keep coming while the escaped character is still being typed.
+--   '--path a\b'        → path = 'a\b'   -- 'b' is not escapable
+-- So nothing typed here is ever malformed: an escape half-written is a literal
+-- backslash until the character that gives it meaning arrives. Quotes have no
+-- meaning at all -- '--path "foo' is the value '"foo'.
 --
 -- Because the query is whatever follows the flags, a flag name only needs
 -- escaping when the query *starts* with one. A standalone "--" ends the flagged
@@ -100,7 +101,6 @@ local _PREFIX = "--"
 ---@field text     string?     -- decoded value, escapes resolved (kind="value")
 ---@field eq       integer?    -- 1-indexed position of the '=' gluing a value on (kind="flag")
 ---@field escapes  integer[]?  -- 1-indexed position of each '\' that escaped a character
----@field dangling integer?    -- 1-indexed position of a trailing '\' that escaped nothing
 
 ---Lookup key for a flag name: the form in which two spellings of the same flag
 ---are equal. Case and the word separators '-' and '_' carry no meaning, so a
@@ -141,7 +141,9 @@ local function _dashed_name(str, i)
 end
 
 ---Read a value starting at `i`: a whitespace-delimited run, except that a
----backslash escapes the character behind it, making whitespace literal.
+---backslash escapes a following backslash or whitespace, which is what lets a
+---value hold either. Anything else a backslash precedes is not escapable, and
+---the backslash then stands for itself -- `:h <f-args>`, exactly.
 ---@param str string
 ---@param i   integer
 ---@return ezpick.queryflags.Piece piece, integer next_i
@@ -150,38 +152,31 @@ local function _read_value(str, i)
     local tok_start = i
     local chars     = {}
     local escapes   = {}
-    ---@type integer?
-    local dangling  = nil
 
     while i <= len do
-        local c = str:sub(i, i)
-        if c == "\\" then
-            if i == len then
-                -- Nothing left to escape: reported, not repaired. Dropping the
-                -- '\' keeps the value usable ('--dir My\' → "My") so the result
-                -- list survives the moment between the pair being typed.
-                dangling = i
-                i        = i + 1
-            else
-                escapes[#escapes + 1] = i
-                chars[#chars + 1]     = str:sub(i + 1, i + 1)
-                i                     = i + 2
-            end
+        local c     = str:sub(i, i)
+        local after = str:sub(i + 1, i + 1)
+        if c == "\\" and (after == "\\" or after:match("%s")) then
+            escapes[#escapes + 1] = i
+            chars[#chars + 1]     = after
+            i                     = i + 2
         elseif c:match("%s") then
             break
         else
+            -- A '\' with nothing escapable behind it, the end of the line
+            -- included: content, not syntax. There is no half-written escape to
+            -- report, and none to repair.
             chars[#chars + 1] = c
             i                 = i + 1
         end
     end
 
     return {
-        kind     = "value",
-        start    = tok_start,
-        finish   = i - 1,
-        text     = table.concat(chars),
-        escapes  = #escapes > 0 and escapes or nil,
-        dangling = dangling,
+        kind    = "value",
+        start   = tok_start,
+        finish  = i - 1,
+        text    = table.concat(chars),
+        escapes = #escapes > 0 and escapes or nil,
     }, i
 end
 
@@ -342,15 +337,6 @@ function M.parse(schema, raw)
             -- A value is only ever pushed right behind the flag it feeds.
             local flag  = assert(last_flag)
 
-            if piece.dangling then
-                hints[#hints + 1] = {
-                    kind   = "dangling-escape",
-                    start  = piece.dangling - 1,
-                    finish = piece.finish,
-                    msg    = "trailing \\",
-                }
-            end
-
             -- A value written out is a value meant, even an empty one: "--repl="
             -- is how an empty replacement is asked for.
             if def.strict then
@@ -444,12 +430,10 @@ function M.highlight(schema, raw)
             table.insert(hls, { start = s0, finish = e0, hl = "@string" })
         end
 
-        -- An escaping '\' is syntax, use a special highlight
+        -- An escaping '\' is syntax, use a special highlight. A '\' that escapes
+        -- nothing is content and keeps the value's own: the difference, visible.
         for _, pos in ipairs(piece.escapes or {}) do
             table.insert(hls, { start = pos - 1, finish = pos, hl = "@string.escape" })
-        end
-        if piece.dangling then
-            table.insert(hls, { start = piece.dangling - 1, finish = piece.dangling, hl = "@string.escape" })
         end
     end
 
@@ -538,9 +522,14 @@ function M.get_completions(schema, line, cursor_byte, auto)
     -- written here, so nothing else is offered.
     local value_def, partial, value_start
     if last and last.kind == "value" and last.finish == #before then
-        -- The whole token is replaced, escapes and all: a half-written escape is
-        -- part of the value being completed, not something to complete after.
-        value_def, partial, value_start = defs[_key(last.name)], assert(last.text), last.start
+        -- The whole token is replaced, backslashes and all. A trailing one is a
+        -- literal backslash by the parse, but under the cursor it is as likely
+        -- the '\' of a "\ " being typed, and matching candidates against it
+        -- would empty the menu for a keystroke; it is dropped from the partial
+        -- rather than searched for.
+        value_def   = defs[_key(last.name)]
+        partial     = (assert(last.text):gsub("\\$", ""))
+        value_start = last.start
     elseif pending then
         value_def, partial, value_start = pending, "", #before + 1
     end

@@ -119,10 +119,9 @@ local _HINT_ICON = "󰀪 "
 
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
-	["missing-value"]   = true,
-	["dangling-escape"] = true,
-	["unknown-flag"]    = true,
-	["bad-value"]       = true,
+	["missing-value"] = true,
+	["unknown-flag"]  = true,
+	["bad-value"]     = true,
 }
 
 ---Whether the cursor is still in the span `hint` points at: it counts as inside
@@ -881,8 +880,8 @@ function Picker:_render_prompt_marks(query)
 	end
 
 	-- A hint about the span the cursor is still inside is a hint about
-	-- unfinished typing: half of "--dir" is a missing value and a lone "\" is an
-	-- escape of nothing, and saying so on the way through helps nobody. Those
+	-- unfinished typing: half of "--dir" is a missing value and half of "--case
+	-- smart" is a bad one, and saying so on the way through helps nobody. Those
 	-- wait for the cursor to leave; a mistake that is already complete does not.
 	local cursor   = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
 	self._hint_col = cursor
@@ -1697,9 +1696,10 @@ function M._flag_completefunc(findstart, base)
 
 	-- Keep only candidates matching what was typed since startcol. Escapes are
 	-- resolved on both sides, so an unescaped partial still matches an escaped
-	-- value (base `fo` or `foo\ b` matches word `foo\ bar`), and a '\' waiting on
-	-- the character it escapes matches what it is on the way to.
-	local function unescaped(s) return (s:gsub("\\(.)", "%1"):gsub("\\$", "")) end
+	-- value (base `fo` or `foo\ b` matches word `foo\ bar`). A trailing '\' goes
+	-- with them: it parses as content, but a candidate must not drop out of the
+	-- menu for the keystroke between it and the space it is there to escape.
+	local function unescaped(s) return (s:gsub("\\([\\%s])", "%1"):gsub("\\$", "")) end
 	local needle = unescaped(base)
 	local items  = {}
 	for _, item in ipairs(completions.items) do

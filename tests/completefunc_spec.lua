@@ -177,12 +177,14 @@ describe("picker query hints", function()
 
     after_each(function() vim.cmd("silent! close!") end)
 
-    it("keeps searching through an unfinished escape", function()
-        -- The moment between the '\' and the character it escapes must not empty
-        -- the list.
-        local query, flags = type_query("--dir My\\")
+    it("searches for a backslash waiting on the space it will escape", function()
+        -- The moment between the '\' and the whitespace it is there to escape is
+        -- not a mistake to report: the backslash stands for itself until the
+        -- next character says otherwise, and the list keeps up either way.
+        local query, flags, hint = type_query("--dir My\\")
         assert.are.equal("", query)
-        assert.are.equal("My", flags.dir)
+        assert.are.equal("My\\", flags.dir)
+        assert.is_nil(hint)
     end)
 
     it("keeps complaining about a value slot the rest of the line has closed", function()
@@ -200,12 +202,10 @@ describe("picker query hints", function()
         -- through them turns the prompt into a stream of complaints.
         assert.is_nil(select(3, type_query("--dir")))
         assert.is_nil(select(3, type_query("--dir ")))
-        assert.is_nil(select(3, type_query("--dir My\\")))
         assert.is_nil(select(3, type_query("--case sm")))
     end)
 
     it("speaks up once the cursor leaves what it points at", function()
-        assert.is_truthy(select(3, type_query("--dir My\\", 2)):find("trailing \\", 1, true))
         assert.is_truthy(select(3, type_query("--case sm x")):find("smart|on|off", 1, true))
     end)
 

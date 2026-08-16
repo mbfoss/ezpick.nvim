@@ -220,17 +220,6 @@ describe("queryflags value flags", function()
         assert.is_nil(r.flags.fixed)
     end)
 
-    it("takes a flag-looking value when its dash is escaped", function()
-        local r = qf.parse(schema, "--path \\--fixed")
-        assert.are.equal("--fixed", r.flags.path)
-        assert.is_nil(r.flags.fixed)
-    end)
-
-    it("takes an escaped separator as a value", function()
-        local r = qf.parse(schema, "--path \\-- foo")
-        assert.are.equal("--", r.flags.path)
-        assert.are.equal("foo", r.query)
-    end)
 
     it("stays unset when nothing follows", function()
         local r = qf.parse(schema, "--path")
@@ -262,9 +251,41 @@ describe("queryflags value flags", function()
         assert.are.equal("c", r.query)
     end)
 
-    it("escapes any character, not just the special ones", function()
+    it("keeps a backslash before a character it cannot escape", function()
+        -- Only whitespace and '\' are escapable, so nothing else loses the
+        -- backslash in front of it -- and there is no such thing as a malformed
+        -- escape to complain about.
         local r = qf.parse(schema, "--path fo\\o")
-        assert.are.equal("foo", r.flags.path)
+        assert.are.equal("fo\\o", r.flags.path)
+        assert.are.same({}, r.hints)
+    end)
+
+    it("keeps a trailing backslash, which escapes nothing", function()
+        local r = qf.parse(schema, "--path foo\\")
+        assert.are.equal("foo\\", r.flags.path)
+        assert.are.same({}, r.hints)
+    end)
+
+    it("follows the escaping rule Neovim uses for command arguments", function()
+        -- The table under `:h <f-args>`, verbatim: value, then what is left over
+        -- as the query.
+        local cases = {
+            { [[ab]],      [[ab]],   "" },
+            { [[a\b]],     [[a\b]],  "" },
+            { [[a\ b]],    [[a b]],  "" },
+            { [[a\  b]],   [[a ]],   "b" },
+            { [[a\\b]],    [[a\b]],  "" },
+            { [[a\\ b]],   [[a\]],   "b" },
+            { [[a\\\b]],   [[a\\b]], "" },
+            { [[a\\\ b]],  [[a\ b]], "" },
+            { [[a\\\\b]],  [[a\\b]], "" },
+            { [[a\\\\ b]], [[a\\]],  "b" },
+        }
+        for _, case in ipairs(cases) do
+            local r = qf.parse(schema, "--path " .. case[1])
+            assert.are.equal(case[2], r.flags.path, case[1])
+            assert.are.equal(case[3], r.query, case[1])
+        end
     end)
 
     it("escapes anywhere in the value, not only at its start", function()
@@ -289,16 +310,11 @@ end)
 describe("queryflags hints", function()
     it("keeps a usable query and flags beside every hint", function()
         -- nothing here may empty the result list: a hint is advice, not a stop.
-        local r = qf.parse(schema, "--fixed --path My\\")
+        local r = qf.parse(schema, "--fixed --case bogus doc")
         assert.is_true(r.flags.fixed)
-        assert.are.equal("My", r.flags.path)
-        assert.is_not_nil(hint_of(r, "dangling-escape"))
-    end)
-
-    it("marks only the trailing backslash, not the value it sits on", function()
-        local h = assert(hint_of(qf.parse(schema, "--path My\\"), "dangling-escape"))
-        assert.are.equal(9, h.start)
-        assert.are.equal(10, h.finish)
+        assert.are.equal("bogus", r.flags.case)
+        assert.are.equal("doc", r.query)
+        assert.is_not_nil(hint_of(r, "bad-value"))
     end)
 
     it("reports a typo'd flag as unknown", function()
@@ -455,16 +471,16 @@ end)
 describe("queryflags highlight", function()
     it("highlights a value flag's name and its value apart", function()
         assert.are.same({
-            { start = 0, finish = 6,  hl = "Keyword" },
-            { start = 7, finish = 10, hl = "String" },
+            { start = 0, finish = 6,  hl = "@keyword" },
+            { start = 7, finish = 10, hl = "@string" },
         }, qf.highlight(schema, "--path foo"))
     end)
 
     it("highlights the = gluing a value on", function()
         assert.are.same({
-            { start = 0, finish = 6,  hl = "Keyword" },
-            { start = 6, finish = 7,  hl = "Delimiter" },
-            { start = 7, finish = 10, hl = "String" },
+            { start = 0, finish = 6,  hl = "@keyword" },
+            { start = 6, finish = 7,  hl = "@tag.delimiter" },
+            { start = 7, finish = 10, hl = "@string" },
         }, qf.highlight(schema, "--path=foo"))
     end)
 
@@ -477,34 +493,33 @@ describe("queryflags highlight", function()
 
     it("highlights the separator and nothing after it", function()
         assert.are.same({
-            { start = 0, finish = 7,  hl = "Keyword" },
-            { start = 8, finish = 10, hl = "Delimiter" },
+            { start = 0, finish = 7,  hl = "@keyword" },
+            { start = 8, finish = 10, hl = "@tag.delimiter" },
         }, qf.highlight(schema, "--fixed -- --fixed --path foo"))
     end)
 
-    it("dims the escaping backslashes in a value", function()
+    it("marks the escaping backslashes in a value", function()
         local escapes = {}
         for _, h in ipairs(qf.highlight(schema, "--path foo\\ bar")) do
-            if h.hl == "NonText" then table.insert(escapes, h) end
+            if h.hl == "@string.escape" then table.insert(escapes, h) end
         end
         assert.are.same({
-            { start = 10, finish = 11, hl = "NonText" },
+            { start = 10, finish = 11, hl = "@string.escape" },
         }, escapes)
     end)
 
-    it("dims a trailing backslash that escapes nothing", function()
-        local escapes = {}
-        for _, h in ipairs(qf.highlight(schema, "--path foo\\")) do
-            if h.hl == "NonText" then table.insert(escapes, h) end
+    it("leaves a backslash that escapes nothing to the value's own highlight", function()
+        -- It is content, not syntax: "--path fo\o" searches for a backslash.
+        for _, line in ipairs({ "--path fo\\o", "--path foo\\" }) do
+            for _, h in ipairs(qf.highlight(schema, line)) do
+                assert.is_true(h.hl ~= "@string.escape", line)
+            end
         end
-        assert.are.same({
-            { start = 10, finish = 11, hl = "NonText" },
-        }, escapes)
     end)
 
-    it("does not dim a backslash in query text", function()
+    it("does not mark a backslash in query text", function()
         for _, h in ipairs(qf.highlight(schema, "a\\ b")) do
-            assert.is_true(h.hl ~= "NonText")
+            assert.is_true(h.hl ~= "@string.escape")
         end
     end)
 end)
@@ -618,13 +633,16 @@ describe("queryflags completion", function()
         assert.are.same({ { word = "foo\\ bar", abbr = "foo bar" } }, comps.items)
     end)
 
-    it("replaces a half-written escape rather than completing after it", function()
-        local line  = "--path fo\\"
+    it("keeps offering candidates through a backslash waiting on its space", function()
+        -- "foo\" parses as a literal backslash, but under the cursor it is as
+        -- likely half of "foo\ bar": matching candidates against it would empty
+        -- the menu for exactly one keystroke.
+        local line  = "--path foo\\"
         local comps = qf.get_completions(schema, line, #line)
         assert.not_nil(comps)
         assert.are.equal(8, comps.startcol)
         assert.is_true(vim.tbl_contains(
-            vim.tbl_map(function(it) return it.word end, comps.items), "foo"))
+            vim.tbl_map(function(it) return it.word end, comps.items), "foo\\ bar"))
     end)
 end)
 

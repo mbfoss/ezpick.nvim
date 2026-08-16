@@ -151,9 +151,12 @@ the query itself starts with one. Completion opens as you type (disable with
 
 Switches are written `--<name>`, filters `--<name> <value>` or
 `--<name>=<value>`; escape with `\` to put a space (or a backslash) in a value —
-`--dir my\ src`. The glued `=` form is the exact one: it can carry an empty value
-(`--filter=`) or a value that looks like a flag (`--dir=--x`). Names are matched
-loosely — `--no-ignore`, `--noignore` and `--NoIgnore` are the same flag.
+`--dir my\ src`, `--dir a\\b`. Escaping follows Neovim's own rule for command
+arguments (`:h <f-args>`): only whitespace and `\` are escapable, and a `\`
+before anything else is the character it is. The glued `=` form is the exact one:
+it can carry an empty value (`--filter=`) or a value that looks like a flag
+(`--dir=--x`). Names are matched loosely — `--no-ignore`, `--noignore` and
+`--NoIgnore` are the same flag.
 
 A switch is set by being written, so it takes no value at all: `--hidden=false`
 and `--hidden=true` are the same mistake, and both leave the switch alone rather
@@ -163,10 +166,10 @@ A standalone `--` ends the flagged section, for the one case that needs it: a
 query starting with a flag name.
 
 Mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, a
-trailing `\` or a flag written after the query gets an underline and a short
-hint under the prompt, while the search keeps running on a best-effort reading. A
-hint about the flag the cursor is still inside waits until the cursor moves on,
-so writing one out correctly is silent.
+value outside a flag's set or a flag written after the query gets an underline
+and a short hint under the prompt, while the search keeps running on a
+best-effort reading. A hint about the flag the cursor is still inside waits
+until the cursor moves on, so writing one out correctly is silent.
 
 A query too long for one line wraps rather than scrolling out of sight, and the
 prompt grows a row at a time to hold it — taking the rows from the list, up to an
