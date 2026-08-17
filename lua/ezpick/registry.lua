@@ -2,6 +2,7 @@ local M = {}
 
 ---@type table<string, ezpick.PickerSpec | fun(): ezpick.PickerSpec?>
 local _pickers = {
+    parser_test           = function() return require("ezpick.pickers.parsertest").spec() end,
     files                 = function() return require("ezpick.pickers.files").spec() end,
     live_grep             = function() return require("ezpick.pickers.livegrep").spec() end,
     recent_files          = function() return require("ezpick.pickers.recentfiles").spec() end,
