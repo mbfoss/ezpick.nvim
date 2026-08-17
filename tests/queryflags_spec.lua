@@ -300,10 +300,27 @@ describe("queryflags value flags", function()
         assert.are.equal("c", r.query)
     end)
 
-    it("collects values for multi flags", function()
-        local r = qf.parse(schema, "--kind a\\ b --kind=c --kind d q")
-        assert.are.same({ "a b", "c", "d" }, r.flags.kind)
+    it("splits a multi flag's value on commas", function()
+        local r = qf.parse(schema, "--kind a,b,c q")
+        assert.are.same({ "a", "b", "c" }, r.flags.kind)
         assert.are.equal("q", r.query)
+        assert.are.same({ "a", "b" }, qf.parse(schema, "--kind=a,b q").flags.kind)
+    end)
+
+    it("takes an escaped comma as a comma inside one value", function()
+        assert.are.same({ "a,b", "c" }, qf.parse(schema, "--kind a\\,b,c q").flags.kind)
+        -- whitespace and commas escape alike, and mix
+        assert.are.same({ "a, b" }, qf.parse(schema, "--kind a\\,\\ b q").flags.kind)
+    end)
+
+    it("keeps a comma in a single-valued flag as an ordinary character", function()
+        assert.are.equal("a,b", qf.parse(schema, "--path a,b q").flags.path)
+        -- ... and an escaped one is still just a comma there
+        assert.are.equal("a,b", qf.parse(schema, "--path a\\,b q").flags.path)
+    end)
+
+    it("gives a multi flag with an empty value one empty value", function()
+        assert.are.same({ "" }, qf.parse(schema, "--kind= q").flags.kind)
     end)
 end)
 
@@ -382,10 +399,13 @@ describe("queryflags hints", function()
         assert.is_nil(hint_of(qf.parse(schema, "--path a hello"), "duplicate-flag"))
     end)
 
-    it("says nothing about a repeated multi flag", function()
-        local r = qf.parse(schema, "--kind x --kind y")
-        assert.are.same({ "x", "y" }, r.flags.kind)
-        assert.is_nil(hint_of(r, "duplicate-flag"))
+    it("points out a repeated multi flag, whose values go in one token", function()
+        local r = qf.parse(schema, "--kind x --kind y,z")
+        assert.are.same({ "y", "z" }, r.flags.kind)
+        local hs = hints_of(r, "duplicate-flag")
+        assert.are.equal(2, #hs)
+        -- the winner is quoted as it was written, commas and all
+        assert.is_truthy(hs[1].msg:find("'y,z'", 1, true))
     end)
 
     it("says nothing about a repeated switch, which discards nothing", function()
@@ -437,6 +457,14 @@ describe("queryflags hints", function()
         assert.are.equal("unknown option --di", msg("--di x", "unknown-flag"))
     end)
 
+    it("marks the one bad value in a strict list, not the whole token", function()
+        local multi = { { name = "kinds", type = "value", multi = true, strict = true, values = { "a", "b" } } }
+        local hs = hints_of(qf.parse(multi, "--kinds a,zz,b x"), "bad-value")
+        assert.are.equal(1, #hs)
+        assert.are.same({ start = 10, finish = 12 }, { start = hs[1].start, finish = hs[1].finish })
+        assert.are.same({ "a", "zz", "b" }, qf.parse(multi, "--kinds a,zz,b x").flags.kinds)
+    end)
+
     it("does not police a non-strict flag's values", function()
         assert.is_nil(hint_of(qf.parse(schema, "--path whatever x"), "bad-value"))
     end)
@@ -474,6 +502,21 @@ describe("queryflags highlight", function()
             { start = 0, finish = 6,  hl = "@keyword" },
             { start = 7, finish = 10, hl = "@string" },
         }, qf.highlight(schema, "--path foo"))
+    end)
+
+    it("marks the commas separating a multi flag's values", function()
+        assert.are.same({
+            { start = 0, finish = 6,  hl = "@keyword" },
+            { start = 7, finish = 10, hl = "@string" },
+            { start = 8, finish = 9,  hl = "@tag.delimiter" },
+        }, qf.highlight(schema, "--kind a,b"))
+    end)
+
+    it("leaves a comma in a single-valued flag to the value's own highlight", function()
+        assert.are.same({
+            { start = 0, finish = 6,  hl = "@keyword" },
+            { start = 7, finish = 10, hl = "@string" },
+        }, qf.highlight(schema, "--path a,b"))
     end)
 
     it("highlights the = gluing a value on", function()
@@ -543,6 +586,7 @@ describe("queryflags completion", function()
         local defs = {
             { name = "dir",   type = "value",   slot = "path" },
             { name = "repl",  type = "value" },
+            { name = "kind",  type = "value",   slot = "name", multi = true },
             { name = "fixed", type = "boolean", slot = "ignored" },
         }
         local abbrs = {}
@@ -552,6 +596,8 @@ describe("queryflags completion", function()
         assert.are.same({
             ["--dir"]   = "--dir <path>",
             ["--repl"]  = "--repl <value>",
+            -- a list says so where it is read before the value is written
+            ["--kind"]  = "--kind <name,...>",
             ["--fixed"] = "--fixed",
         }, abbrs)
     end)
@@ -638,6 +684,30 @@ describe("queryflags completion", function()
         assert.not_nil(spaced)
         assert.are.equal("foo\\ bar", spaced.word)
         assert.are.equal("foo bar", qf.parse(schema, "--path " .. spaced.word).flags.path)
+    end)
+
+    it("completes the value being written, not the list before it", function()
+        local multi = { { name = "kinds", type = "value", multi = true, values = { "foo", "bar", "foo,bar" } } }
+        local line  = "--kinds foo,b"
+        local comps = qf.get_completions(multi, line, #line)
+        assert.not_nil(comps)
+        -- the startcol sits past the comma, so accepting replaces "b" alone
+        assert.are.equal(13, comps.startcol)
+        assert.are.same({ { word = "bar", abbr = "bar" } }, comps.items)
+    end)
+
+    it("escapes a comma in a multi flag's candidate so it re-parses as one value", function()
+        local multi = { { name = "kinds", type = "value", multi = true, values = { "foo,bar" } } }
+        local comps = assert(qf.get_completions(multi, "--kinds ", 8))
+        assert.are.same({ { word = "foo\\,bar", abbr = "foo,bar" } }, comps.items)
+        assert.are.same({ "foo,bar" }, qf.parse(multi, "--kinds foo\\,bar").flags.kinds)
+    end)
+
+    it("leaves a comma in a single-valued flag's candidate unescaped", function()
+        -- it is content there, and a backslash the typed text has not got would
+        -- lose the item to the live pum filter on the next keystroke
+        local one = { { name = "one", type = "value", values = { "a,b" } } }
+        assert.are.same({ { word = "a,b", abbr = "a,b" } }, assert(qf.get_completions(one, "--one a,", 8)).items)
     end)
 
     it("matches candidates against a partial written with escapes", function()

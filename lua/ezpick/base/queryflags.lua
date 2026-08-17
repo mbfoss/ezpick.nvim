@@ -8,7 +8,7 @@ local M = {}
 ---@class ezpick.queryflags.FlagDef
 ---@field name     string
 ---@field type     "boolean"|"value"
----@field multi    boolean?   -- allow multiple occurrences (type=value only)
+---@field multi    boolean?   -- value is a comma-separated list (type=value only)
 ---@field strict   boolean?   -- `values` is the complete set; anything else is hinted (type=value only, requires `values`)
 ---@field values   string[]?  -- known static values offered in completion (type=value only)
 ---@field complete ezpick.queryflags.CompleteSpec?  -- dynamic value completion source (type=value only)
@@ -20,7 +20,7 @@ local M = {}
 
 ---@alias ezpick.queryflags.HintKind
 ---| "unknown-flag"     -- a dashed word that names no flag
----| "duplicate-flag"   -- a single-valued flag given more than once
+---| "duplicate-flag"   -- a value flag given more than once
 ---| "missing-value"    -- a value flag with nothing to take
 ---| "bad-value"        -- a value outside a strict flag's `values`
 ---| "unexpected-value" -- a value glued onto a switch
@@ -78,14 +78,22 @@ local _PREFIX = "--"
 -- naming a known flag is not swallowed as a value -- '--dir --hidden' is a
 -- forgotten value, not a directory called "--hidden".
 --
+-- A flag is written at most once. A `multi` flag takes its several values in
+-- one go, comma-separated, rather than by being repeated:
+--   '--kind a,b,c'  → kind = {'a','b','c'}
+-- so a second '--kind' is the same mistake as a second '--path': the later one
+-- wins and the repetition is hinted.
+--
 -- Escaping (via \) applies only to a value, anywhere in it, by Neovim's own
--- rule for command arguments (:h <f-args>): '\\' is one backslash, '\' before
--- whitespace is that whitespace as an ordinary character, and a '\' before
--- anything else -- including the end of the line -- is left exactly as written.
+-- rule for command arguments (:h <f-args>), plus the comma the list separates
+-- on: '\\' is one backslash, '\' before whitespace or ',' is that character as
+-- ordinary content, and a '\' before anything else -- including the end of the
+-- line -- is left exactly as written.
 --   '--path foo\ bar'   → path = 'foo bar'
 --   '--path=foo\ bar'   → path = 'foo bar'
 --   '--path a\\b'       → path = 'a\b'
 --   '--path a\b'        → path = 'a\b'   -- 'b' is not escapable
+--   '--kind a\,b'       → kind = {'a,b'} -- one value holding a comma
 -- So nothing typed here is ever malformed: an escape half-written is a literal
 -- backslash until the character that gives it meaning arrives. Quotes have no
 -- meaning at all -- '--path "foo' is the value '"foo'.
@@ -102,6 +110,8 @@ local _PREFIX = "--"
 ---@field name     string?     -- canonical flag this piece names (kind="flag") or feeds (kind="value")
 ---@field typed    string?     -- how that flag was actually spelled here, which `name` may only be a synonym of
 ---@field text     string?     -- decoded value, escapes resolved (kind="value")
+---@field parts    string[]?   -- `text` cut at its unescaped commas; one entry when it has none (kind="value")
+---@field seps     integer[]?  -- 1-indexed position of each comma that cut `parts`
 ---@field eq       integer?    -- 1-indexed position of the '=' gluing a value on (kind="flag")
 ---@field escapes  integer[]?  -- 1-indexed position of each '\' that escaped a character
 
@@ -143,44 +153,110 @@ local function _dashed_name(str, i)
     return name, i + #_PREFIX + #name - 1
 end
 
+---The bytes `_read_value` decides on, compared as bytes: the character each
+---stands for is only ever cut out of the line once it is known to be kept.
+local _BSLASH = 92 -- '\'
+local _COMMA  = 44 -- ','
+
+---Whether `b` is what `%s` matches: ' ' or one of \t\n\v\f\r. Nil (past the end
+---of the line) is not whitespace, which is what makes a trailing '\' content.
+---@param b integer?
+---@return boolean
+local function _is_space(b)
+    return b == 32 or (b ~= nil and b >= 9 and b <= 13)
+end
+
 ---Read a value starting at `i`: a whitespace-delimited run, except that a
----backslash escapes a following backslash or whitespace, which is what lets a
----value hold either. Anything else a backslash precedes is not escapable, and
----the backslash then stands for itself -- `:h <f-args>`, exactly.
+---backslash escapes a following backslash, whitespace or comma, which is what
+---lets a value hold any of them. Anything else a backslash precedes is not
+---escapable, and the backslash then stands for itself -- `:h <f-args>`, plus
+---the comma the list form needs a way to write literally.
+---
+---The cut at unescaped commas is made here for every value; whether it means
+---anything is the flag's business (`multi`), and `text` keeps the commas so a
+---single-valued flag reads them as the ordinary characters they are.
+---
+---Only the three characters that can mean something are looked at: the value is
+---read in runs between them, and an ordinary one is never handled on its own.
 ---@param str string
 ---@param i   integer
 ---@return ezpick.queryflags.Piece piece, integer next_i
 local function _read_value(str, i)
     local len       = #str
     local tok_start = i
-    local chars     = {}
     local escapes   = {}
+    local parts     = {}
+    local chunks    = {} -- the current part, in runs
+    local plain     = i  -- start of the ordinary run not yet taken
 
-    while i <= len do
-        local c     = str:sub(i, i)
-        local after = str:sub(i + 1, i + 1)
-        if c == "\\" and (after == "\\" or after:match("%s")) then
-            escapes[#escapes + 1] = i
-            chars[#chars + 1]     = after
-            i                     = i + 2
-        elseif c:match("%s") then
+    ---@type integer[]
+    local seps      = {}
+
+    while true do
+        local j = str:find("[%s\\,]", i)
+        if not j then
+            i = len + 1
             break
+        end
+
+        local b = str:byte(j)
+        if b == _BSLASH then
+            local after = str:byte(j + 1)
+            if after == _BSLASH or after == _COMMA or _is_space(after) then
+                if j > plain then chunks[#chunks + 1] = str:sub(plain, j - 1) end
+                escapes[#escapes + 1] = j
+                chunks[#chunks + 1]   = str:sub(j + 1, j + 1)
+                i, plain              = j + 2, j + 2
+            else
+                -- A '\' with nothing escapable behind it, the end of the line
+                -- included: content, not syntax. There is no half-written escape
+                -- to report, and none to repair, so the run carries on over it.
+                i = j + 1
+            end
+        elseif b == _COMMA then
+            if j > plain then chunks[#chunks + 1] = str:sub(plain, j - 1) end
+            seps[#seps + 1]   = j
+            parts[#parts + 1] = table.concat(chunks)
+            chunks            = {}
+            i, plain          = j + 1, j + 1
         else
-            -- A '\' with nothing escapable behind it, the end of the line
-            -- included: content, not syntax. There is no half-written escape to
-            -- report, and none to repair.
-            chars[#chars + 1] = c
-            i                 = i + 1
+            i = j -- whitespace ends the value
+            break
         end
     end
+
+    if i > plain then chunks[#chunks + 1] = str:sub(plain, i - 1) end
+    parts[#parts + 1] = table.concat(chunks)
 
     return {
         kind    = "value",
         start   = tok_start,
         finish  = i - 1,
-        text    = table.concat(chars),
+        text    = table.concat(parts, ","),
+        parts   = parts,
+        seps    = #seps > 0 and seps or nil,
         escapes = #escapes > 0 and escapes or nil,
     }, i
+end
+
+---The parts of a value piece with the span each was written in, so a hint or a
+---completion can point at one of several values rather than at all of them.
+---@param piece ezpick.queryflags.Piece
+---@return {text:string, start:integer, finish:integer}[]
+local function _spanned_parts(piece)
+    local parts = assert(piece.parts)
+    local seps  = piece.seps or {}
+    local out   = {}
+
+    for k, text in ipairs(parts) do
+        out[k] = {
+            text   = text,
+            start  = k == 1 and piece.start or (seps[k - 1] + 1),
+            finish = seps[k] and (seps[k] - 1) or piece.finish,
+        }
+    end
+
+    return out
 end
 
 ---Walk the flagged prefix of `str`, stopping at the query.
@@ -315,7 +391,7 @@ function M.parse(schema, raw)
     local defs                         = _build_map(schema)
     local flags                        = {}
     local pieces, query_start, hints   = _scan(raw, defs)
-    ---Name spans of every occurrence of each single-valued flag, left to right.
+    ---Name spans of every occurrence of each value flag, left to right.
     ---@type table<string, {start:integer, finish:integer, typed:string}[]>
     local occurrences                  = {}
     ---@type ezpick.queryflags.Piece?
@@ -344,39 +420,41 @@ function M.parse(schema, raw)
             -- is how an empty replacement is asked for.
             if def.strict then
                 local values = assert(def.values)
-                if not vim.tbl_contains(values, value) then
-                    -- Whether a prefix of a valid choice is a wrong value or an
-                    -- unfinished one is the cursor's answer to give, not ours.
-                    -- An empty value has no span of its own to point at
-                    -- ("--case="), so the mark falls back to the flag that went
-                    -- without one.
-                    local spanned = piece.finish >= piece.start
-                    hints[#hints + 1] = {
-                        kind   = "bad-value",
-                        start  = (spanned and piece.start or flag.start) - 1,
-                        finish = spanned and piece.finish or flag.finish,
-                        msg    = ("%s%s: %s"):format(_PREFIX, piece.typed, table.concat(values, "|")),
-                    }
+                -- Each value of a list stands or falls on its own, and the mark
+                -- goes on the one at fault rather than on the whole token.
+                local spans = def.multi and _spanned_parts(piece)
+                    or { { text = value, start = piece.start, finish = piece.finish } }
+                for _, span in ipairs(spans) do
+                    if not vim.tbl_contains(values, span.text) then
+                        -- Whether a prefix of a valid choice is a wrong value or
+                        -- an unfinished one is the cursor's answer to give, not
+                        -- ours. An empty value has no span of its own to point
+                        -- at ("--case="), so the mark falls back to the flag
+                        -- that went without one.
+                        local spanned = span.finish >= span.start
+                        hints[#hints + 1] = {
+                            kind   = "bad-value",
+                            start  = (spanned and span.start or flag.start) - 1,
+                            finish = spanned and span.finish or flag.finish,
+                            msg    = ("%s%s: %s"):format(_PREFIX, piece.typed, table.concat(values, "|")),
+                        }
+                    end
                 end
             end
 
-            if def.multi then
-                flags[piece.name] = flags[piece.name] or {}
-                table.insert(flags[piece.name], value)
-            else
-                -- Only the last value of a repeated flag survives, and the ones
-                -- it displaces leave no mark on the line: every occurrence still
-                -- reads as an accepted flag. Note where they are, to say so once
-                -- the winner is known.
-                local spans = occurrences[piece.name] or {}
-                spans[#spans + 1] = {
-                    start  = flag.start - 1,
-                    finish = flag.eq and (flag.eq - 1) or flag.finish,
-                    typed  = assert(flag.typed),
-                }
-                occurrences[piece.name] = spans
-                flags[piece.name] = value
-            end
+            -- Only the last value of a repeated flag survives -- a `multi` flag
+            -- included, whose several values go in one comma-separated token --
+            -- and the ones it displaces leave no mark on the line: every
+            -- occurrence still reads as an accepted flag. Note where they are,
+            -- to say so once the winner is known.
+            local spans = occurrences[piece.name] or {}
+            spans[#spans + 1] = {
+                start  = flag.start - 1,
+                finish = flag.eq and (flag.eq - 1) or flag.finish,
+                typed  = assert(flag.typed),
+            }
+            occurrences[piece.name] = spans
+            flags[piece.name] = def.multi and assert(piece.parts) or value
         end
     end
 
@@ -385,6 +463,10 @@ function M.parse(schema, raw)
     -- which one that is depends on what else the line has to say.
     for name, spans in pairs(occurrences) do
         if #spans > 1 then
+            -- The winner is quoted as it would be written: a list goes back
+            -- together with the commas that separate it.
+            local shown = flags[name]
+            if type(shown) == "table" then shown = table.concat(shown, ",") end
             for _, span in ipairs(spans) do
                 hints[#hints + 1] = {
                     kind   = "duplicate-flag",
@@ -392,7 +474,7 @@ function M.parse(schema, raw)
                     finish = span.finish,
                     -- Each mark speaks for the spelling it sits on: two aliases
                     -- of one flag are one repetition, told twice in two names.
-                    msg    = ("%s%s set %d times, using '%s'"):format(_PREFIX, span.typed, #spans, flags[name]),
+                    msg    = ("%s%s set %d times, using '%s'"):format(_PREFIX, span.typed, #spans, shown),
                 }
             end
         end
@@ -431,6 +513,13 @@ function M.highlight(schema, raw)
             end
         elseif e0 > s0 then
             table.insert(hls, { start = s0, finish = e0, hl = "@string" })
+            -- A comma only separates where the flag takes a list; elsewhere it
+            -- is part of the value and stays styled as one.
+            if defs[_key(piece.name)].multi then
+                for _, pos in ipairs(piece.seps or {}) do
+                    table.insert(hls, { start = pos - 1, finish = pos, hl = "@tag.delimiter" })
+                end
+            end
         end
 
         -- An escaping '\' is syntax, use a special highlight. A '\' that escapes
@@ -456,8 +545,14 @@ end
 local function _value_items(def, partial)
     local items = {}
 
+    -- A comma is syntax only in a list, where a candidate holding one has to be
+    -- escaped to come back as itself. Escaping it elsewhere would put a
+    -- backslash in the inserted word that the typed text has not got, and Vim's
+    -- live pum filter would drop the item on the next keystroke.
+    local pat = def.multi and "[\\,%s]" or "[\\%s]"
+
     local function add(v)
-        table.insert(items, { word = (v:gsub("[\\%s]", "\\%0")), abbr = v })
+        table.insert(items, { word = (v:gsub(pat, "\\%0")), abbr = v })
     end
 
     for _, v in ipairs(def.values or {}) do
@@ -484,7 +579,9 @@ end
 local function _slot(def)
     if def.type == "boolean" then return "" end
     -- Without a name of its own, the slot can only say that something goes here.
-    return (" <%s>"):format(def.slot or "value")
+    -- A list says so in the slot: it is the only place the comma form is
+    -- visible before someone has already written the value the wrong way.
+    return (" <%s%s>"):format(def.slot or "value", def.multi and ",..." or "")
 end
 
 ---Flag names matching the word typed so far.
@@ -542,9 +639,16 @@ function M.get_completions(schema, line, cursor_byte, auto)
         -- the '\' of a "\ " being typed, and matching candidates against it
         -- would empty the menu for a keystroke; it is dropped from the partial
         -- rather than searched for.
-        value_def   = defs[_key(last.name)]
-        partial     = (assert(last.text):gsub("\\$", ""))
-        value_start = last.start
+        value_def = defs[_key(last.name)]
+        local text, start = assert(last.text), last.start
+        if value_def.multi then
+            -- Only the value being written is completed; the ones already
+            -- listed before the last comma stand.
+            local parts = _spanned_parts(last)
+            text, start = parts[#parts].text, parts[#parts].start
+        end
+        partial     = (text:gsub("\\$", ""))
+        value_start = start
     elseif pending then
         value_def, partial, value_start = pending, "", #before + 1
     end

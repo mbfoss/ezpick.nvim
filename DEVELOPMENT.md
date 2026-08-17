@@ -55,7 +55,10 @@ tests/                   plenary busted specs
   completion. Flags come first and scanning stops at the first word that names
   none, so `ParseResult.query` is a verbatim slice from `query_start` — pickers
   that grep for what was typed depend on that. `\` escaping is local to a value
-  and follows `:h <f-args>`: only whitespace and `\` are escapable. A
+  and follows `:h <f-args>` plus the list separator: only whitespace, `,` and
+  `\` are escapable. A `multi` flag takes its values comma-separated in one
+  token (`--type lua,rust`) and comes back as a `string[]`; every flag is
+  written at most once, and a repetition is hinted with the last one winning. A
   standalone `--` ends the flagged section for a query that must start with a
   flag name. `parse` never fails on what was typed: anything doubtful comes back
   as an advisory `ParseResult.hints` entry beside a usable query, which the

@@ -152,11 +152,16 @@ the query itself starts with one. Completion opens as you type (disable with
 Switches are written `--<name>`, filters `--<name> <value>` or
 `--<name>=<value>`; escape with `\` to put a space (or a backslash) in a value —
 `--dir my\ src`, `--dir a\\b`. Escaping follows Neovim's own rule for command
-arguments (`:h <f-args>`): only whitespace and `\` are escapable, and a `\`
+arguments (`:h <f-args>`), plus `\,` for a literal comma: only whitespace, `,`
+and `\` are escapable, and a `\`
 before anything else is the character it is. The glued `=` form is the exact one:
 it can carry an empty value (`--filter=`) or a value that looks like a flag
 (`--dir=--x`). Names are matched loosely — `--no-ignore`, `--noignore` and
 `--NoIgnore` are the same flag.
+
+A filter that takes several values takes them comma-separated, in one go:
+`--type lua,rust`, `--filter *.lua,*.md`. Every flag is written at most once —
+repeating one is a mistake, and the last occurrence wins.
 
 A switch is set by being written, so it takes no value at all: `--hidden=false`
 and `--hidden=true` are the same mistake, and both leave the switch alone rather
@@ -186,7 +191,7 @@ several of which are OR'd together.
 ```
 :Pick files --hidden --dir ~/src
 :Pick live_grep --regex --filter *.lua fn%s+%w+
-:Pick live_grep --type lua --type !markdown --word setup
+:Pick live_grep --type lua,!markdown --word setup
 :Pick live_grep --dir ~/src -- --hidden               " searches for "--hidden"
 ```
 
