@@ -13,7 +13,7 @@ local M = {}
 ---@field values   string[]?  -- known static values offered in completion (type=value only)
 ---@field complete ezpick.queryflags.CompleteSpec?  -- dynamic value completion source (type=value only)
 ---@field alias    string[]?  -- extra names accepted for this flag
----@field desc     string?    -- shown in the completion menu
+---@field desc     string?    -- shown in the completion menu, beside the form the flag takes
 
 ---@alias ezpick.queryflags.HintKind
 ---| "unknown-flag"     -- a dashed word that names no flag
@@ -433,7 +433,7 @@ function M.highlight(schema, raw)
         -- An escaping '\' is syntax, use a special highlight. A '\' that escapes
         -- nothing is content and keeps the value's own: the difference, visible.
         for _, pos in ipairs(piece.escapes or {}) do
-            table.insert(hls, { start = pos - 1, finish = pos, hl = "@string.escape" })
+            table.insert(hls, { start = pos - 1, finish = pos, hl = "NonText" })
         end
     end
 
@@ -476,6 +476,14 @@ local function _value_items(def, partial)
     return items
 end
 
+---@param def ezpick.queryflags.FlagDef
+---@return string  -- "" for a switch, else " <...>" with its leading space
+local function _slot(def)
+    if def.type == "boolean" then return "" end
+    local slot = "value"
+    return (" <%s>"):format(slot)
+end
+
 ---Flag names matching the word typed so far.
 ---@param schema       ezpick.queryflags.FlagDef[]
 ---@param current_word string
@@ -489,13 +497,17 @@ local function _flag_items(schema, current_word)
     -- among the flags they actually want.
     for _, def in ipairs(schema) do
         -- The dashes are part of the flag's written form, so the menu shows
-        -- them: what is listed is exactly what accepting the item inserts.
+        -- them: what is listed is what accepting the item inserts, plus the
+        -- slot it wants filled next.
         local word = _PREFIX .. def.name
         if vim.startswith(_key(word), _key(current_word)) then
             table.insert(items, {
                 word = word,
-                abbr = word,
-                menu = def.desc or (def.type == "boolean" and "[flag]" or "[filter]"),
+                -- The slot goes in `abbr`, glued to the name by a single space:
+                -- `kind` is a column of its own and would be padded out to the
+                -- widest entry, leaving a gap where the value is meant to sit.
+                abbr = word .. _slot(def),
+                menu = def.desc or "",
             })
         end
     end
