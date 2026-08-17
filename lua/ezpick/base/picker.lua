@@ -150,6 +150,7 @@ local function _show_help()
 `j` / `k`     Next / previous history entry (normal mode)
 `<C-Space>`   Complete flags
 `<C-t>`       Jump between the flags and the query
+`<C-f>`       Start a new flag in the flags section
 `<C-q>`       Send results to quickfix list
 `<C-r><C-w>`  Insert original <cword>
 `g?`          Show help
@@ -1561,16 +1562,44 @@ function Picker:close(selected_data)
 	end
 end
 
+---The prompt line, and where the flags section ends in it (0-indexed, trailing
+---whitespace excluded).
+---@return string line, integer flags_end, integer query_start
+function Picker:_prompt_sections()
+	local line        = vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or ""
+	local query_start = queryflags.parse(self.opts.flags, line).query_start
+	return line, #(line:sub(1, query_start - 1):gsub("%s+$", "")), query_start
+end
+
 ---Move the cursor between the end of the flags section and the end of the query.
 function Picker:toggle_prompt_section()
 	if not self.pwin then return end
-	local line        = vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or ""
-	local col         = vim.api.nvim_win_get_cursor(self.pwin)[2]
-	local query_start = queryflags.parse(self.opts.flags, line).query_start
-	local flags_end   = #(line:sub(1, query_start - 1):gsub("%s+$", ""))
-	local target      = col >= query_start - 1 and flags_end or #line
+	local line, flags_end, query_start = self:_prompt_sections()
+	local col                          = vim.api.nvim_win_get_cursor(self.pwin)[2]
+	local target                       = col >= query_start - 1 and flags_end or #line
 	if target == col then target = #line end
 	vim.api.nvim_win_set_cursor(self.pwin, { 1, target })
+end
+
+---Open a new flag at the end of the flags section and put the cursor in it,
+---keeping a space between it and whatever follows.
+function Picker:insert_flag()
+	if not self.pwin then return end
+	local line, flags_end = self:_prompt_sections()
+	local col             = vim.api.nvim_win_get_cursor(self.pwin)[2]
+
+	-- Already writing a flag: the cursor is where a new one would put it.
+	local word = line:sub(1, col):match("%S*$")
+	if word:sub(1, 1) == "-" and col - #word <= flags_end then return end
+
+	local rest = line:sub(flags_end + 1)
+	local pre  = flags_end > 0 and " " or ""
+	local post = rest:sub(1, 1):match("%s") and "" or " "
+
+	vim.api.nvim_buf_set_lines(self.pbuf, 0, 1, false,
+		{ line:sub(1, flags_end) .. pre .. "--" .. post .. rest })
+	vim.api.nvim_win_set_cursor(self.pwin, { 1, flags_end + #pre + 2 })
+	vim.cmd("startinsert")
 end
 
 function Picker:setup_input()
@@ -1636,6 +1665,7 @@ function Picker:setup_input()
 
 		if #self.opts.flags > 0 then
 			vim.keymap.set({ "i", "n" }, "<C-t>", function() self:toggle_prompt_section() end, pbuf_key_opts)
+			vim.keymap.set({ "i", "n" }, "<C-f>", function() self:insert_flag() end, pbuf_key_opts)
 		end
 
 		vim.keymap.set("i", "<C-Space>", function()
