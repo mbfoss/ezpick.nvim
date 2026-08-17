@@ -149,6 +149,7 @@ local function _show_help()
 `<C-k>`       Previous search history entry
 `j` / `k`     Next / previous history entry (normal mode)
 `<C-Space>`   Complete flags
+`<C-t>`       Jump between the flags and the query
 `<C-q>`       Send results to quickfix list
 `<C-r><C-w>`  Insert original <cword>
 `g?`          Show help
@@ -1560,6 +1561,18 @@ function Picker:close(selected_data)
 	end
 end
 
+---Move the cursor between the end of the flags section and the end of the query.
+function Picker:toggle_prompt_section()
+	if not self.pwin then return end
+	local line        = vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or ""
+	local col         = vim.api.nvim_win_get_cursor(self.pwin)[2]
+	local query_start = queryflags.parse(self.opts.flags, line).query_start
+	local flags_end   = #(line:sub(1, query_start - 1):gsub("%s+$", ""))
+	local target      = col >= query_start - 1 and flags_end or #line
+	if target == col then target = #line end
+	vim.api.nvim_win_set_cursor(self.pwin, { 1, target })
+end
+
 function Picker:setup_input()
 	do
 		local pbuf_key_opts = _key_opts_of(self.pbuf)
@@ -1620,6 +1633,10 @@ function Picker:setup_input()
 		vim.keymap.set("n", "k", function() self:history_prev() end, pbuf_key_opts)
 
 		vim.keymap.set({ "n", "i" }, "<C-q>", function() self:send_to_qf() end, pbuf_key_opts)
+
+		if #self.opts.flags > 0 then
+			vim.keymap.set({ "i", "n" }, "<C-t>", function() self:toggle_prompt_section() end, pbuf_key_opts)
+		end
 
 		vim.keymap.set("i", "<C-Space>", function()
 			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true), "n", false)
