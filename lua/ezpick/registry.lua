@@ -42,10 +42,50 @@ local _pickers = {
     help_tags             = function() return require("ezpick.pickers.helptags").spec() end,
 }
 
+---`M.pick` intercepts these before the registry is consulted, so a source
+---taking one of these names could never be opened.
+local _reserved = {
+    resume = true,
+}
+
+---Add a source under `name`. A name already in use is suffixed with a counter
+---(`files_2`) instead of replacing what is there, so neither source is lost to
+---load order.
 ---@param name string
 ---@param spec ezpick.PickerSpec | fun(): ezpick.PickerSpec?
+---@return string name The name the source was registered under.
 function M.register(name, spec)
+    if type(name) ~= "string" or name == "" then
+        error("ezpick.register: name must be a non-empty string", 2)
+    end
+    -- `:Pick <name> <query>` splits on whitespace and the picker list shows the
+    -- name verbatim, so a name with spaces in it is unreachable.
+    if name:find("%s") then
+        error("ezpick.register: name must not contain whitespace: " .. name, 2)
+    end
+    if _reserved[name] then
+        error("ezpick.register: '" .. name .. "' is reserved by ezpick", 2)
+    end
+    local spec_type = type(spec)
+    if spec_type ~= "table" and spec_type ~= "function" then
+        error("ezpick.register: spec must be a table or a function returning one, got " .. spec_type, 2)
+    end
+
+    if _pickers[name] ~= nil then
+        local taken = name
+        local n = 1
+        repeat
+            n = n + 1
+            name = taken .. "_" .. n
+        until _pickers[name] == nil
+        vim.notify(
+            string.format("ezpick: source '%s' is already registered; using '%s' instead", taken, name),
+            vim.log.levels.WARN
+        )
+    end
+
     _pickers[name] = spec
+    return name
 end
 
 ---@param name string

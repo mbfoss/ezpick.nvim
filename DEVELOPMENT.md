@@ -84,6 +84,10 @@ exactly the same interface as anything registered with `require("ezpick").regist
 returning its spec, so a source's module is only `require`d the first time it is
 opened. Keep `setup()` cheap and defer heavy work to first use.
 
+Names are unique: `register` appends a counter (`tasks_2`) rather than
+overwriting an existing entry, warns, and returns the name it used. Nothing
+already in the table can be replaced, built-in or not.
+
 A `finder` may return a cancel function; the engine calls it when the query
 changes or the picker closes, so long-running work (rg, LSP requests) must be
 cancellable.

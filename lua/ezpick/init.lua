@@ -187,10 +187,13 @@ function M.pick(picker_type, initial_query)
     end
 end
 
+---Add a source under `name`. A name already taken by a built-in or another
+---plugin is suffixed with a counter; the name actually used is returned.
 ---@param name string
 ---@param spec ezpick.PickerSpec | fun(): ezpick.PickerSpec?
+---@return string name
 function M.register(name, spec)
-    require("ezpick.registry").register(name, spec)
+    return require("ezpick.registry").register(name, spec)
 end
 
 --- Define ezpick's own highlight groups, as defaults so a colorscheme can

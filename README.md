@@ -211,6 +211,16 @@ The spec may also be a function returning a spec, in which case it is built
 lazily on each open. See the `ezpick.PickerSpec` annotation in
 [`lua/ezpick/init.lua`](lua/ezpick/init.lua) for every field.
 
+Built-ins and third-party sources share one flat namespace, so `register` never
+overwrites: a name already taken gets a counter appended (`tasks` → `tasks_2`),
+with a warning, and `register` returns the name actually used. Both sources stay
+reachable, and load order decides which one keeps the plain name — prefix yours
+(`myplugin.tasks`) to stay out of the race.
+
+A name that could never be opened is an error rather than a warning: the empty
+string, a name containing whitespace (`:Pick` splits its arguments on it), and
+`resume` (handled by `:Pick` before the registry is consulted).
+
 ## Highlight groups
 
 | Group | Links to |

@@ -28,6 +28,71 @@ describe("registry", function()
     end)
 end)
 
+describe("registry.register", function()
+    local SPEC = { prompt = "test", finder = function() end, on_confirm = function() end }
+
+    ---Run `fn` with `vim.notify` captured.
+    ---@param fn fun()
+    ---@return string[]
+    local function capture_warnings(fn)
+        local warnings = {}
+        local notify = vim.notify
+        ---@diagnostic disable-next-line: duplicate-set-field
+        vim.notify = function(msg, level)
+            if level == vim.log.levels.WARN then table.insert(warnings, msg) end
+        end
+        local ok, err = pcall(fn)
+        vim.notify = notify
+        if not ok then error(err) end
+        return warnings
+    end
+
+    it("registers a new name", function()
+        assert.equals("test_new_source", registry.register("test_new_source", SPEC))
+        assert.is_true(registry.has("test_new_source"))
+    end)
+
+    it("suffixes a taken name instead of replacing it", function()
+        registry.register("test_taken", SPEC)
+        local other = vim.tbl_extend("force", SPEC, { prompt = "other" })
+        local name
+        local warnings = capture_warnings(function()
+            name = registry.register("test_taken", other)
+        end)
+        assert.equals("test_taken_2", name)
+        assert.equals(1, #warnings)
+        assert.is_truthy(warnings[1]:find("test_taken_2", 1, true))
+        -- Both sources are reachable, the first under the name it claimed.
+        assert.equals("test", registry.get("test_taken").prompt)
+        assert.equals("other", registry.get("test_taken_2").prompt)
+    end)
+
+    it("counts up past every taken suffix", function()
+        capture_warnings(function()
+            registry.register("test_counter", SPEC)
+            registry.register("test_counter", SPEC)
+            assert.equals("test_counter_3", registry.register("test_counter", SPEC))
+        end)
+    end)
+
+    it("does not replace a built-in", function()
+        local name
+        capture_warnings(function()
+            name = registry.register("files", SPEC)
+        end)
+        assert.equals("files_2", name)
+        assert.is_not.equals("test", registry.get("files").prompt)
+    end)
+
+    it("rejects unusable names", function()
+        assert.has_error(function() registry.register("", SPEC) end)
+        assert.has_error(function() registry.register("two words", SPEC) end)
+        assert.has_error(function() registry.register("resume", SPEC) end)
+        ---@diagnostic disable-next-line: param-type-mismatch
+        assert.has_error(function() registry.register("test_bad_spec", "nope") end)
+    end)
+end)
+
 describe("ranking", function()
     local rank_items  = require("ezpick.base.picker")._rank_items
     local match_label = require("ezpick.base.pickertools").match_label
