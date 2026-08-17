@@ -1,8 +1,7 @@
 local M = {}
 
----A source for a value flag's completion candidates: either a
----`vim.fn.getcompletion()` type (e.g. "file", "dir", "buffer", "color"), or a
----function returning candidates for the partial value typed so far.
+---A value flag's completion source: a `vim.fn.getcompletion()` type (e.g.
+---"file", "dir", "buffer") or a function returning candidates for the partial.
 ---@alias ezpick.queryflags.CompleteSpec string|fun(partial:string):string[]
 
 ---@class ezpick.queryflags.FlagDef
@@ -13,9 +12,7 @@ local M = {}
 ---@field values   string[]?  -- known static values offered in completion (type=value only)
 ---@field complete ezpick.queryflags.CompleteSpec?  -- dynamic value completion source (type=value only)
 ---@field alias    string[]?  -- extra names accepted for this flag
----@field slot     string?    -- what the value stands for, shown as "--name <slot>" in the
----                           -- completion menu (type=value only); keep it a short word,
----                           -- it shares the line with the name and the description
+---@field slot     string?    -- short word for what the value stands for, shown as "--name <slot>"
 ---@field desc     string?    -- shown in the completion menu, beside the form the flag takes
 
 ---@alias ezpick.queryflags.HintKind
@@ -25,22 +22,16 @@ local M = {}
 ---| "bad-value"        -- a value outside a strict flag's `values`
 ---| "unexpected-value" -- a value glued onto a switch
 
----A problem worth pointing out that is never worth refusing to search over:
----every hint is advisory, and `parse` always returns a usable query beside it.
----
----Everything wrong with the line is reported, including the half-written states
----any correct flag passes through on the way to being one. Telling those apart
----takes the cursor, which `parse` does not have: a consumer that shows hints as
----they are typed holds back the kinds that typing can still resolve until the
----cursor leaves the span --- except where `settled` says typing on cannot.
+---Advisory only: `parse` always returns a usable query beside its hints, and
+---reports the half-written states a correct flag passes through too. Telling
+---those apart takes the cursor, which the consumer holds -- see `settled`.
 ---@class ezpick.queryflags.Hint
 ---@field start   integer  -- 0-indexed byte start of the offending span
 ---@field finish  integer  -- 0-indexed byte end of the offending span (exclusive)
 ---@field msg     string   -- terse; it shares the prompt line with the query
 ---@field kind    ezpick.queryflags.HintKind
----@field settled boolean? -- typing on cannot resolve this one, so a consumer that
----                        -- holds hints back while they are being written should
----                        -- show it anyway
+---@field settled boolean? -- typing on cannot resolve this one, so show it even
+---                        -- while the cursor is still inside the span
 
 ---@class ezpick.queryflags.ParseResult
 ---@field query       string  -- the query, verbatim: every byte from where the flags stop
@@ -52,56 +43,22 @@ local M = {}
 ---@field startcol integer  -- 1-indexed column for vim.fn.complete()
 ---@field items    table[]
 
----Marks a flag ("--name"); alone it is the separator that ends the flagged
----section, after which everything is literal text.
+---Marks a flag ("--name"); alone it is the separator ending the flagged section.
 local _PREFIX = "--"
 
--- Syntax:
+-- Syntax (README has the full account):
 --
 --   [--flag] [--flag value] [--flag=value] ... [--] <query, verbatim>
 --
--- Flags come first. Scanning stops at the first token that does not name a
--- known flag, and everything from there to the end of the line is the query,
--- byte for byte -- spaces, backslashes and dashes in it are ordinary characters.
--- That verbatim tail is the point of the ordering: a picker that greps for what
--- was typed must receive exactly what was typed.
+-- Flags come first; the query is every byte from the first token that names no
+-- flag, so a picker that greps for what was typed gets exactly that. Names
+-- ignore case, '-' and '_'. A flag is written at most once, a `multi` one
+-- taking its several values comma-separated in the one token.
 --
 --   '--hidden --dir src foo  bar'  → flags hidden, dir=src; query 'foo  bar'
 --   'foo --hidden'                 → query 'foo --hidden', flag unset
---
--- Flag names are matched loosely: case, '-' and '_' are ignored, so --no-ignore,
--- --noignore and --NoIgnore are the same flag, as is any name listed in `alias`.
---
--- A value flag takes its value either glued on with '=' or as the next token.
--- The glued form is the precise one: it can express an empty value ("--repl=")
--- and a value that looks like a flag ("--dir=--x"). In the spaced form a token
--- naming a known flag is not swallowed as a value -- '--dir --hidden' is a
--- forgotten value, not a directory called "--hidden".
---
--- A flag is written at most once. A `multi` flag takes its several values in
--- one go, comma-separated, rather than by being repeated:
---   '--kind a,b,c'  → kind = {'a','b','c'}
--- so a second '--kind' is the same mistake as a second '--path': the later one
--- wins and the repetition is hinted.
---
--- Escaping (via \) applies only to a value, anywhere in it, by Neovim's own
--- rule for command arguments (:h <f-args>), plus the comma the list separates
--- on: '\\' is one backslash, '\' before whitespace or ',' is that character as
--- ordinary content, and a '\' before anything else -- including the end of the
--- line -- is left exactly as written.
---   '--path foo\ bar'   → path = 'foo bar'
---   '--path=foo\ bar'   → path = 'foo bar'
---   '--path a\\b'       → path = 'a\b'
---   '--path a\b'        → path = 'a\b'   -- 'b' is not escapable
---   '--kind a\,b'       → kind = {'a,b'} -- one value holding a comma
--- So nothing typed here is ever malformed: an escape half-written is a literal
--- backslash until the character that gives it meaning arrives. Quotes have no
--- meaning at all -- '--path "foo' is the value '"foo'.
---
--- Because the query is whatever follows the flags, a flag name only needs
--- escaping when the query *starts* with one. A standalone "--" ends the flagged
--- section for that case:
---   '-- --hidden'  → query '--hidden'
+--   '--kind a,b\,c'                → kind = {'a', 'b,c'}
+--   '-- --hidden'                  → query '--hidden'
 --
 ---@class ezpick.queryflags.Piece
 ---@field kind     "flag"|"value"|"separator"
@@ -115,9 +72,8 @@ local _PREFIX = "--"
 ---@field eq       integer?    -- 1-indexed position of the '=' gluing a value on (kind="flag")
 ---@field escapes  integer[]?  -- 1-indexed position of each '\' that escaped a character
 
----Lookup key for a flag name: the form in which two spellings of the same flag
----are equal. Case and the word separators '-' and '_' carry no meaning, so a
----user who writes --noignore gets the flag they obviously meant.
+---Lookup key for a flag name: case and the word separators '-' and '_' carry no
+---meaning, so --noignore and --no-ignore are one flag.
 ---@param name string
 ---@return string
 local function _key(name)
@@ -129,10 +85,8 @@ end
 local function _build_map(schema)
     local m = {}
     for _, def in ipairs(schema) do
-        -- Strictness is enforced against `values`, so a strict flag that lists
-        -- none would quietly accept everything. That is a schema mistake rather
-        -- than a user one, and it is worth hearing about on the first render
-        -- instead of never: everything downstream may take the pair as given.
+        -- Strictness is enforced against `values`, so a strict flag listing none
+        -- would quietly accept everything: a schema mistake, said on first render.
         assert(not def.strict or (def.values and #def.values > 0),
             ("%s%s is strict but lists no values"):format(_PREFIX, def.name))
         m[_key(def.name)] = def
@@ -153,31 +107,21 @@ local function _dashed_name(str, i)
     return name, i + #_PREFIX + #name - 1
 end
 
----The bytes `_read_value` decides on, compared as bytes: the character each
----stands for is only ever cut out of the line once it is known to be kept.
 local _BSLASH = 92 -- '\'
 local _COMMA  = 44 -- ','
 
----Whether `b` is what `%s` matches: ' ' or one of \t\n\v\f\r. Nil (past the end
----of the line) is not whitespace, which is what makes a trailing '\' content.
+---Whether `b` is what `%s` matches. Nil (past the end of the line) is not
+---whitespace, which is what makes a trailing '\' content.
 ---@param b integer?
 ---@return boolean
 local function _is_space(b)
     return b == 32 or (b ~= nil and b >= 9 and b <= 13)
 end
 
----Read a value starting at `i`: a whitespace-delimited run, except that a
----backslash escapes a following backslash, whitespace or comma, which is what
----lets a value hold any of them. Anything else a backslash precedes is not
----escapable, and the backslash then stands for itself -- `:h <f-args>`, plus
----the comma the list form needs a way to write literally.
----
----The cut at unescaped commas is made here for every value; whether it means
----anything is the flag's business (`multi`), and `text` keeps the commas so a
----single-valued flag reads them as the ordinary characters they are.
----
----Only the three characters that can mean something are looked at: the value is
----read in runs between them, and an ordinary one is never handled on its own.
+---Read a value starting at `i`: a whitespace-delimited run in which '\' escapes
+---a following '\', whitespace or comma (`:h <f-args>`, plus the list separator),
+---cut into `parts` at its unescaped commas. Read in runs between those three
+---bytes; an ordinary character is never handled on its own.
 ---@param str string
 ---@param i   integer
 ---@return ezpick.queryflags.Piece piece, integer next_i
@@ -209,8 +153,7 @@ local function _read_value(str, i)
                 i, plain              = j + 2, j + 2
             else
                 -- A '\' with nothing escapable behind it, the end of the line
-                -- included: content, not syntax. There is no half-written escape
-                -- to report, and none to repair, so the run carries on over it.
+                -- included, is content: the run carries on over it.
                 i = j + 1
             end
         elseif b == _COMMA then
@@ -232,6 +175,8 @@ local function _read_value(str, i)
         kind    = "value",
         start   = tok_start,
         finish  = i - 1,
+        -- Rejoining the parts rebuilds the value: an escaped comma is already
+        -- inside the part holding it, so only the separators go back.
         text    = table.concat(parts, ","),
         parts   = parts,
         seps    = #seps > 0 and seps or nil,
@@ -280,9 +225,8 @@ local function _scan(str, defs)
         hints[#hints + 1] = { kind = kind, start = s - 1, finish = e, msg = msg, settled = settled or nil }
     end
 
-    ---Every message echoes the spelling on the line rather than the canonical
-    ---name: the mark and the words have to describe the same thing, and with an
-    ---alias in play the canonical name may be nowhere in sight.
+    ---Echoes the spelling on the line, not the canonical name: the mark and the
+    ---words have to describe one thing, and an alias hides the canonical one.
     ---@param def   ezpick.queryflags.FlagDef
     ---@param typed string  -- the flag as written here
     ---@return string
@@ -310,10 +254,8 @@ local function _scan(str, defs)
         local name, name_end = _dashed_name(str, i)
         local def            = name and defs[_key(name)]
         if not def then
-            -- Not a flag, so this is where the query begins. A dashed word that
-            -- merely misses the schema is worth a nudge. Whether it is a typo or
-            -- a prefix still being typed is not decided here: only the cursor
-            -- tells those two apart, and the consumer is the one holding it.
+            -- Not a flag, so the query begins here. Whether a dashed word is a
+            -- typo or a prefix still being typed is the cursor's to answer.
             if name then
                 assert(name_end)
                 hint("unknown-flag", tok_start, name_end, ("unknown option %s%s"):format(_PREFIX, name))
@@ -340,12 +282,8 @@ local function _scan(str, defs)
             value.typed = name
             flag_piece.finish = value.finish
             if def.type == "boolean" then
-                -- A switch is written by being there, so there is no value it
-                -- could be assigned that would be right: "--fixed=false" reads
-                -- as turning something off and "--fixed=true" as belt and
-                -- braces, and neither is a form this understands. Both are the
-                -- same mistake, and `parse` leaves the switch alone rather than
-                -- picking the reading that happens to be spelled out.
+                -- A switch is written by being there: "--fixed=false" and
+                -- "--fixed=true" are the same mistake, and neither is acted on.
                 hint("unexpected-value", tok_start, value.finish,
                     ("%s%s takes no value"):format(_PREFIX, name))
             else
@@ -357,19 +295,14 @@ local function _scan(str, defs)
             local next_name = _dashed_name(str, j)
             local next_sep  = str:sub(j, j + 1) == _PREFIX and (j + 2 > len or str:sub(j + 2, j + 2):match("%s"))
             if j > len then
-                -- Nothing typed yet: the slot is open rather than wrong, so this
-                -- doubles as the prompt for what to put there. The slot only
-                -- exists once something separates it from the name, though:
-                -- "--mode" is a name still being typed -- perhaps into "--modes"
-                -- -- and offering it values would complete the wrong thing.
+                -- An open slot, prompting for what goes there -- but only once
+                -- something separates it from the name: "--mode" with the cursor
+                -- on it is a name still being typed, perhaps into "--modes".
                 if i <= len then pending = def end
                 hint("missing-value", tok_start, name_end, needs_value(def, name))
             elseif next_sep or (next_name and defs[_key(next_name)]) then
-                -- Something already stands where the value would go, so the slot
-                -- is closed: unlike the open one above, typing on at the end of
-                -- the line will never fill it. Settled, and said at once --- it
-                -- is exactly the state a value deleted from the middle leaves
-                -- behind, and going quiet there rewards making the line worse.
+                -- Something already stands where the value would go, so typing
+                -- on can never fill the slot: settled, and said at once.
                 hint("missing-value", tok_start, name_end, needs_value(def, name), true)
             else
                 local value
@@ -397,16 +330,14 @@ function M.parse(schema, raw)
     ---@type ezpick.queryflags.Piece?
     local last_flag                    = nil
 
-    -- The separator carries nothing of its own: its whole effect is on where
-    -- `_scan` stopped, and the query starts past it either way.
+    -- The separator carries nothing of its own: its effect was on where `_scan`
+    -- stopped.
     for _, piece in ipairs(pieces) do
         if piece.kind == "flag" then
             last_flag = piece
-            -- A value flag's value is a piece of its own; only switches are
-            -- carried by the name itself -- and only when written as one. An
-            -- assignment to a switch is a mistake either way round (see the
-            -- "unexpected-value" hint), so it turns nothing on: reading
-            -- "--fixed=false" as fixed would be the opposite of what it says.
+            -- Only a switch is carried by its name, and only written as one: an
+            -- assignment to it is a mistake either way round, so it turns
+            -- nothing on (see the "unexpected-value" hint).
             if defs[_key(piece.name)].type == "boolean" and not piece.eq then
                 flags[piece.name] = true
             end
@@ -416,21 +347,16 @@ function M.parse(schema, raw)
             -- A value is only ever pushed right behind the flag it feeds.
             local flag  = assert(last_flag)
 
-            -- A value written out is a value meant, even an empty one: "--repl="
-            -- is how an empty replacement is asked for.
+            -- A value written out is a value meant, even an empty one.
             if def.strict then
                 local values = assert(def.values)
-                -- Each value of a list stands or falls on its own, and the mark
-                -- goes on the one at fault rather than on the whole token.
+                -- Each value of a list stands or falls on its own.
                 local spans = def.multi and _spanned_parts(piece)
                     or { { text = value, start = piece.start, finish = piece.finish } }
                 for _, span in ipairs(spans) do
                     if not vim.tbl_contains(values, span.text) then
-                        -- Whether a prefix of a valid choice is a wrong value or
-                        -- an unfinished one is the cursor's answer to give, not
-                        -- ours. An empty value has no span of its own to point
-                        -- at ("--case="), so the mark falls back to the flag
-                        -- that went without one.
+                        -- An empty value has no span to point at ("--case="), so
+                        -- the mark falls back to the flag that went without one.
                         local spanned = span.finish >= span.start
                         hints[#hints + 1] = {
                             kind   = "bad-value",
@@ -442,11 +368,9 @@ function M.parse(schema, raw)
                 end
             end
 
-            -- Only the last value of a repeated flag survives -- a `multi` flag
-            -- included, whose several values go in one comma-separated token --
-            -- and the ones it displaces leave no mark on the line: every
-            -- occurrence still reads as an accepted flag. Note where they are,
-            -- to say so once the winner is known.
+            -- Only the last value of a repeated flag survives, `multi` included,
+            -- and the ones it displaces leave no mark on the line. Note where
+            -- they are, to say so once the winner is known.
             local spans = occurrences[piece.name] or {}
             spans[#spans + 1] = {
                 start  = flag.start - 1,
@@ -459,12 +383,10 @@ function M.parse(schema, raw)
     end
 
     -- Every occurrence is marked, so the repetition is visible as a whole, and
-    -- all of them carry the message: only the leftmost is ever given words, and
-    -- which one that is depends on what else the line has to say.
+    -- all of them carry the message.
     for name, spans in pairs(occurrences) do
         if #spans > 1 then
-            -- The winner is quoted as it would be written: a list goes back
-            -- together with the commas that separate it.
+            -- The winner is quoted as it would be written, commas and all.
             local shown = flags[name]
             if type(shown) == "table" then shown = table.concat(shown, ",") end
             for _, span in ipairs(spans) do
@@ -513,8 +435,7 @@ function M.highlight(schema, raw)
             end
         elseif e0 > s0 then
             table.insert(hls, { start = s0, finish = e0, hl = "@string" })
-            -- A comma only separates where the flag takes a list; elsewhere it
-            -- is part of the value and stays styled as one.
+            -- A comma only separates where the flag takes a list.
             if defs[_key(piece.name)].multi then
                 for _, pos in ipairs(piece.seps or {}) do
                     table.insert(hls, { start = pos - 1, finish = pos, hl = "@tag.delimiter" })
@@ -522,33 +443,30 @@ function M.highlight(schema, raw)
             end
         end
 
-        -- An escaping '\' is syntax, use a special highlight. A '\' that escapes
-        -- nothing is content and keeps the value's own: the difference, visible.
+        -- An escaping '\' is syntax; one that escapes nothing is content and
+        -- keeps the value's own highlight. The difference, visible.
         for _, pos in ipairs(piece.escapes or {}) do
             table.insert(hls, { start = pos - 1, finish = pos, hl = "NonText" })
         end
     end
 
-    -- The query is plain by construction: nothing past `query_start` is styled,
-    -- so a flag name typed there visibly reads as the ordinary word it became.
+    -- Nothing past `query_start` is styled, so a flag name typed there reads as
+    -- the ordinary word it became.
     return hls
 end
 
----Candidates for the value of `def`, as completion items replacing the whole
----value token. The inserted word is escaped so it re-parses as the candidate it
----names; the menu shows the plain text. Escaping is what the typed value uses
----too, so an escaped candidate still shares the typed prefix and Vim's live pum
----filter keeps it.
+---Candidates for the value of `def`, as items replacing the whole value token.
+---The inserted word is escaped so it re-parses as the candidate it names, which
+---is also how the typed value is written, so the live pum filter keeps it.
 ---@param def     ezpick.queryflags.FlagDef
 ---@param partial string  -- value text typed so far, unescaped
 ---@return table[]
 local function _value_items(def, partial)
     local items = {}
 
-    -- A comma is syntax only in a list, where a candidate holding one has to be
-    -- escaped to come back as itself. Escaping it elsewhere would put a
-    -- backslash in the inserted word that the typed text has not got, and Vim's
-    -- live pum filter would drop the item on the next keystroke.
+    -- A comma is syntax only in a list. Escaping it elsewhere would put a
+    -- backslash in the word that the typed text has not got, and the pum filter
+    -- would drop the item on the next keystroke.
     local pat = def.multi and "[\\,%s]" or "[\\%s]"
 
     local function add(v)
@@ -577,10 +495,9 @@ end
 ---@param def ezpick.queryflags.FlagDef
 ---@return string  -- "" for a switch, else " <...>" with its leading space
 local function _slot(def)
+    -- Without a name of its own the slot only says that something goes here; a
+    -- list says so too, this being the only place the comma form is visible.
     if def.type == "boolean" then return "" end
-    -- Without a name of its own, the slot can only say that something goes here.
-    -- A list says so in the slot: it is the only place the comma form is
-    -- visible before someone has already written the value the wrong way.
     return (" <%s%s>"):format(def.slot or "value", def.multi and ",..." or "")
 end
 
@@ -591,21 +508,17 @@ end
 local function _flag_items(schema, current_word)
     local items = {}
 
-    -- The separator is not offered. It matters only for a query that has to
-    -- start with a flag name, and anyone in that corner can type the two
-    -- characters; everyone else would just be reading a cryptic entry sitting
-    -- among the flags they actually want.
+    -- The separator is not offered: it matters only for a query that has to
+    -- start with a flag name, and typing it is two characters.
     for _, def in ipairs(schema) do
-        -- The dashes are part of the flag's written form, so the menu shows
-        -- them: what is listed is what accepting the item inserts, plus the
-        -- slot it wants filled next.
+        -- What is listed is what accepting the item inserts, plus the slot it
+        -- wants filled next.
         local word = _PREFIX .. def.name
         if vim.startswith(_key(word), _key(current_word)) then
             table.insert(items, {
                 word = word,
-                -- The slot goes in `abbr`, glued to the name by a single space:
-                -- `kind` is a column of its own and would be padded out to the
-                -- widest entry, leaving a gap where the value is meant to sit.
+                -- The slot goes in `abbr`, not `kind`: a column of its own would
+                -- be padded out, leaving a gap where the value is meant to sit.
                 abbr = word .. _slot(def),
                 menu = def.desc or "",
             })
@@ -629,21 +542,17 @@ function M.get_completions(schema, line, cursor_byte, auto)
     local pieces, query_start, _, pending = _scan(before, defs)
     local last                            = pieces[#pieces]
 
-    -- Case 1: on the value of a value flag -- either typing it, or sitting in
-    -- the empty slot right after the flag's name. A value is all that can be
-    -- written here, so nothing else is offered.
+    -- Case 1: on the value of a value flag, typing it or sitting in the empty
+    -- slot after the name. A value is all that can be written here.
     local value_def, partial, value_start
     if last and last.kind == "value" and last.finish == #before then
-        -- The whole token is replaced, backslashes and all. A trailing one is a
-        -- literal backslash by the parse, but under the cursor it is as likely
-        -- the '\' of a "\ " being typed, and matching candidates against it
-        -- would empty the menu for a keystroke; it is dropped from the partial
-        -- rather than searched for.
+        -- A trailing '\' parses as a literal backslash, but under the cursor it
+        -- is as likely half of a "\ " being typed: it is dropped from the
+        -- partial rather than searched for.
         value_def = defs[_key(last.name)]
         local text, start = assert(last.text), last.start
         if value_def.multi then
-            -- Only the value being written is completed; the ones already
-            -- listed before the last comma stand.
+            -- Only the value being written is completed.
             local parts = _spanned_parts(last)
             text, start = parts[#parts].text, parts[#parts].start
         end
@@ -659,20 +568,18 @@ function M.get_completions(schema, line, cursor_byte, auto)
         return #items > 0 and { startcol = value_start, items = items } or nil
     end
 
-    -- Case 2: a flag name. Only the word the flags could still extend to is
-    -- completable -- once the query has started, a dashed word in it is text and
-    -- completing it would offer a flag that could not take effect there.
+    -- Case 2: a flag name. Once the query has started a dashed word in it is
+    -- text, and completing it would offer a flag that could not take effect.
     local word_start = assert(tonumber(before:match("()%S*$")))
     if query_start < word_start then return nil end
 
     local current_word = before:sub(word_start)
-    -- Past a settled separator every character is literal. One right under the
-    -- cursor is still being typed: it is as much the start of "--flag" as it is
-    -- the separator, so keep completing.
+    -- Past a settled separator every character is literal; one under the cursor
+    -- is as much the start of "--flag" as it is the separator.
     if last and last.kind == "separator" and last.finish ~= #before then return nil end
 
-    -- A bare word could be query text, so only offer names once the leading dash
-    -- makes the intent explicit, or on an explicit (non-auto) trigger.
+    -- A bare word could be query text, so names are offered only once a leading
+    -- dash makes the intent explicit, or on an explicit (non-auto) trigger.
     if auto and current_word:sub(1, 1) ~= "-" then return nil end
 
     local items = _flag_items(schema, current_word)
