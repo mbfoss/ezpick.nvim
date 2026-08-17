@@ -1562,23 +1562,32 @@ function Picker:close(selected_data)
 	end
 end
 
----The prompt line, and where the flags section ends in it (0-indexed, trailing
----whitespace excluded).
----@return string line, integer flags_end, integer query_start
+---The prompt line and where its flags section ends (0-indexed): past the last
+---flag, dashed words the parser gave up on -- a typo, or one half written --
+---included, and in front of the "--" separator, which a flag has to precede.
+---@return string line, integer flags_end
 function Picker:_prompt_sections()
-	local line        = vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or ""
-	local query_start = queryflags.parse(self.opts.flags, line).query_start
-	return line, #(line:sub(1, query_start - 1):gsub("%s+$", "")), query_start
+	local line = vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or ""
+	local at   = queryflags.parse(self.opts.flags, line).query_start - 1
+
+	while true do
+		local s, e = line:find("%S+", at + 1)
+		if not (s and e) then break end
+		if line:sub(s, s) ~= "-" or line:sub(s, e) == "--" then break end
+		at = e
+	end
+
+	local head = line:sub(1, at):gsub("%s+$", "")
+	head = head:gsub("%f[%-]%-%-$", ""):gsub("%s+$", "")
+	return line, #head
 end
 
 ---Move the cursor between the end of the flags section and the end of the query.
 function Picker:toggle_prompt_section()
 	if not self.pwin then return end
-	local line, flags_end, query_start = self:_prompt_sections()
-	local col                          = vim.api.nvim_win_get_cursor(self.pwin)[2]
-	local target                       = col >= query_start - 1 and flags_end or #line
-	if target == col then target = #line end
-	vim.api.nvim_win_set_cursor(self.pwin, { 1, target })
+	local line, flags_end = self:_prompt_sections()
+	local col             = vim.api.nvim_win_get_cursor(self.pwin)[2]
+	vim.api.nvim_win_set_cursor(self.pwin, { 1, col > flags_end and flags_end or #line })
 end
 
 ---Open a new flag at the end of the flags section and put the cursor in it,
