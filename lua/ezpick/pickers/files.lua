@@ -24,7 +24,7 @@ local icons       = require("ezpick.icons")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
-    { name = "dir",    type = "value",   complete = "dir",                  desc = "override search root directory" },
+    { name = "dir",    type = "value",   complete = "dir", slot = "path",   desc = "override search root directory" },
     { name = "fixed",  type = "boolean", desc = "match a literal substring (default: fuzzy)" },
     { name = "glob",   type = "boolean", desc = "read the query as globs over the path: src/*.lua !*_spec.lua" },
     { name = "inpath", type = "boolean", desc = "match the whole relative path, not just the filename" },

@@ -6,9 +6,9 @@ local fsutil      = require("ezpick.util.fsutil")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
-    { name = "sev",  type = "value", multi = true, desc = "filter by severity: error, warn, info, hint" },
-    { name = "src",  type = "value", multi = true, desc = "filter by diagnostic source"                 },
-    { name = "filter", type = "value", multi = true, desc = "glob filter: *.txt, **/dir/**"             },
+    { name = "sev",    type = "value", multi = true, slot = "level", desc = "filter by severity: error, warn, info, hint" },
+    { name = "src",    type = "value", multi = true, slot = "name",  desc = "filter by diagnostic source"                 },
+    { name = "filter", type = "value", multi = true, slot = "glob",  desc = "glob filter: *.txt, **/dir/**"               },
 }
 
 local SEV_MAP = {

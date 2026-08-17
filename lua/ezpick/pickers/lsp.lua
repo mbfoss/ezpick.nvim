@@ -22,7 +22,7 @@ end
 
 ---@type ezpick.queryflags.FlagDef[]
 local REF_FLAGS = {
-    { name = "filter", type = "value", multi = true, desc = "glob filter: *.txt, **/dir/**" },
+    { name = "filter", type = "value", multi = true, slot = "glob", desc = "glob filter: *.txt, **/dir/**" },
 }
 
 ---Every LSP SymbolKind name, in protocol order (SymbolKind 1..26).

@@ -7,9 +7,9 @@ local _modes = { "n", "i", "v", "x", "s", "o", "c", "t" }
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
-    { name = "mode",     type = "value",   multi = true,                      desc = "filter by mode: n, i, v, x, s, o, c, t", values = _modes },
-    { name = "key",      type = "value",   multi = true,                      desc = "filter by key (lhs)" },
-    { name = "src",      type = "value",   multi = true,                      desc = "filter by source file" },
+    { name = "mode",     type = "value",   multi = true, slot = "mode",       desc = "filter by mode: n, i, v, x, s, o, c, t", values = _modes },
+    { name = "key",      type = "value",   multi = true, slot = "lhs",        desc = "filter by key (lhs)" },
+    { name = "src",      type = "value",   multi = true, slot = "file",       desc = "filter by source file" },
     { name = "buflocal", type = "boolean", desc = "only buffer-local keymaps" },
 }
 

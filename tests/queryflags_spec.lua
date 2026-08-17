@@ -539,6 +539,23 @@ describe("queryflags completion", function()
         assert.is_true(vim.tbl_contains(words(schema, "--pa"), "--path"))
     end)
 
+    it("shows a value flag's slot beside its name, named by the schema", function()
+        local defs = {
+            { name = "dir",   type = "value",   slot = "path" },
+            { name = "repl",  type = "value" },
+            { name = "fixed", type = "boolean", slot = "ignored" },
+        }
+        local abbrs = {}
+        for _, item in ipairs(assert(qf.get_completions(defs, "--", 2)).items) do
+            abbrs[item.word] = item.abbr
+        end
+        assert.are.same({
+            ["--dir"]   = "--dir <path>",
+            ["--repl"]  = "--repl <value>",
+            ["--fixed"] = "--fixed",
+        }, abbrs)
+    end)
+
     it("completes a name written without its separators", function()
         assert.is_true(vim.tbl_contains(words(schema, "--noig"), "--no-ignore"))
     end)

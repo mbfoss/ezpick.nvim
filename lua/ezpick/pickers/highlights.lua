@@ -8,9 +8,9 @@ local _attrs = {
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
-    { name = "linksto", type = "value",   multi = true, desc = "filter by link target group" },
+    { name = "linksto", type = "value",   multi = true, slot = "group", desc = "filter by link target group" },
     { name = "linked",  type = "boolean", desc = "only groups that link to another group" },
-    { name = "attr",    type = "value",   multi = true, values = _attrs, desc = "has attribute: bold, italic, underline, ..." },
+    { name = "attr",    type = "value",   multi = true, values = _attrs, slot = "name", desc = "has attribute: bold, italic, underline, ..." },
 }
 
 ---@param name string

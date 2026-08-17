@@ -5,9 +5,9 @@ local ui          = require("ezpick.util.ui")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
-    { name = "event", type = "value", multi = true, desc = "filter by event name" },
-    { name = "group", type = "value", multi = true, desc = "filter by augroup"    },
-    { name = "pat",   type = "value", multi = true, desc = "filter by pattern"    },
+    { name = "event", type = "value", multi = true, slot = "name",    desc = "filter by event name" },
+    { name = "group", type = "value", multi = true, slot = "name",    desc = "filter by augroup"    },
+    { name = "pat",   type = "value", multi = true, slot = "pattern", desc = "filter by pattern"    },
 }
 
 ---Where an autocommand was declared. A Lua callback carries its own chunk name

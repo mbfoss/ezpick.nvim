@@ -10,7 +10,7 @@ local FLAGS        = {
     { name = "warnings", type = "boolean", desc = "show warning items" },
     { name = "info",     type = "boolean", desc = "show info items" },
     { name = "hints",    type = "boolean", desc = "show hint items" },
-    { name = "filter",   type = "value",   multi = true,                                desc = "glob filter: *.txt, **/dir/**" },
+    { name = "filter",   type = "value",   multi = true, slot = "glob",                  desc = "glob filter: *.txt, **/dir/**" },
     { name = "valid",    type = "boolean", desc = "only items with a resolved location" },
 }
 

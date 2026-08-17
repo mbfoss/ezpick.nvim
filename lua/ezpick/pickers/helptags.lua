@@ -134,7 +134,7 @@ function M.spec()
     -- filter, and strictness would hint against every such value.
     ---@type ezpick.queryflags.FlagDef[]
     local flag_schema = {
-        { name = "file", type = "value", multi = true, values = files, alias = { "source" }, desc = "filter by help file" },
+        { name = "file", type = "value", multi = true, values = files, alias = { "source" }, slot = "name", desc = "filter by help file" },
     }
 
     return {

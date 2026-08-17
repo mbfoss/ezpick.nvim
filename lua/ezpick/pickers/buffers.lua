@@ -6,7 +6,7 @@ local fsutil      = require("ezpick.util.fsutil")
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS       = {
-    { name = "ft",       type = "value",   multi = true,                     desc = "filter by filetype" },
+    { name = "ft",       type = "value",   multi = true, slot = "name",      desc = "filter by filetype" },
     { name = "modified", type = "boolean", desc = "only modified buffers" },
     { name = "unloaded", type = "boolean", desc = "include unloaded buffers" },
     { name = "unlisted", type = "boolean", desc = "include unlisted buffers" },

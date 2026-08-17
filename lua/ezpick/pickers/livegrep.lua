@@ -136,9 +136,9 @@ end
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
-    { name = "dir",       type = "value",   complete = "dir",                              desc = "search root directory" },
-    { name = "filter",    type = "value",   multi = true,                                  desc = "glob filter: *.txt, !*.lua, **/dir/**" },
-    { name = "type",      type = "value",   multi = true,                                  complete = complete_type,                      desc = "rg file type: lua, rust, !md (see rg --type-list)" },
+    { name = "dir",       type = "value",   complete = "dir", slot = "path",               desc = "search root directory" },
+    { name = "filter",    type = "value",   multi = true,     slot = "glob",               desc = "glob filter: *.txt, !*.lua, **/dir/**" },
+    { name = "type",      type = "value",   multi = true,     slot = "name",               complete = complete_type,                      desc = "rg file type: lua, rust, !md (see rg --type-list)" },
     { name = "regex",     type = "boolean", desc = "enable regex mode" },
     { name = "case",      type = "boolean", desc = "case-sensitive (default: smart case)" },
     { name = "nocase",    type = "boolean", desc = "case-insensitive (default: smart case)" },
@@ -148,7 +148,7 @@ local FLAGS = {
     { name = "follow",    type = "boolean", desc = "follow symlinks" },
     { name = "hidden",    type = "boolean", desc = "include hidden (dotfiles)" },
     { name = "no-ignore", type = "boolean", desc = "disable .gitignore / .ignore rules" },
-    { name = "max-depth", type = "value",   desc = "max directory depth to descend" },
+    { name = "max-depth", type = "value",   slot = "n", desc = "max directory depth to descend" },
 }
 
 

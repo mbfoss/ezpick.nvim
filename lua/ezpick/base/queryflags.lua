@@ -13,6 +13,9 @@ local M = {}
 ---@field values   string[]?  -- known static values offered in completion (type=value only)
 ---@field complete ezpick.queryflags.CompleteSpec?  -- dynamic value completion source (type=value only)
 ---@field alias    string[]?  -- extra names accepted for this flag
+---@field slot     string?    -- what the value stands for, shown as "--name <slot>" in the
+---                           -- completion menu (type=value only); keep it a short word,
+---                           -- it shares the line with the name and the description
 ---@field desc     string?    -- shown in the completion menu, beside the form the flag takes
 
 ---@alias ezpick.queryflags.HintKind
@@ -480,8 +483,8 @@ end
 ---@return string  -- "" for a switch, else " <...>" with its leading space
 local function _slot(def)
     if def.type == "boolean" then return "" end
-    local slot = "value"
-    return (" <%s>"):format(slot)
+    -- Without a name of its own, the slot can only say that something goes here.
+    return (" <%s>"):format(def.slot or "value")
 end
 
 ---Flag names matching the word typed so far.
