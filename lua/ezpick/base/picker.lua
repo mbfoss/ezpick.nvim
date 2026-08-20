@@ -188,9 +188,8 @@ end
 local function _place_preview_cursor(win, lnum, col)
 	vim.api.nvim_win_call(win, function()
 		if not col or col < 0 then col = 0 end
-		local ok = pcall(vim.api.nvim_win_set_cursor, win, { lnum, col })
-		if not ok then
-			ok = pcall(vim.api.nvim_win_set_cursor, win, { lnum, 0 })
+		if not pcall(vim.api.nvim_win_set_cursor, win, { lnum, col }) then
+			pcall(vim.api.nvim_win_set_cursor, win, { lnum, 0 })
 		end
 		vim.cmd("normal! zz")
 	end)
@@ -206,24 +205,26 @@ local function _apply_preview_pos(win, buf, pos, pos_end)
 		vim.api.nvim_win_set_cursor(win, { 1, 0 })
 		return
 	end
-	local lnum = _clamp(pos[1], 1, vim.api.nvim_buf_line_count(buf))
+	local last = vim.api.nvim_buf_line_count(buf)
+	local lnum = _clamp(pos[1], 1, last)
 	_place_preview_cursor(win, lnum, pos[2])
+
+	-- Without an end position the whole line is highlighted.
+	local start_col = 0
+	local end_row = lnum
+	local end_col = nil ---@type integer?
 	if pos_end then
-		vim.api.nvim_buf_set_extmark(buf, _NS_PREVIEW, lnum - 1, pos[2], {
-			end_row  = _clamp(pos_end[1], lnum, vim.api.nvim_buf_line_count(buf) + 1) - 1,
-			end_col  = pos_end[2],
-			hl_group = "Visual",
-			hl_eol   = true,
-			hl_mode  = "blend",
-		})
-	else
-		vim.api.nvim_buf_set_extmark(buf, _NS_PREVIEW, lnum - 1, 0, {
-			end_row  = lnum,
-			hl_group = "Visual",
-			hl_eol   = true,
-			hl_mode  = "blend",
-		})
+		start_col = pos[2]
+		end_row   = _clamp(pos_end[1], lnum, last + 1) - 1
+		end_col   = pos_end[2]
 	end
+	vim.api.nvim_buf_set_extmark(buf, _NS_PREVIEW, lnum - 1, start_col, {
+		end_row  = end_row,
+		end_col  = end_col,
+		hl_group = "Visual",
+		hl_eol   = true,
+		hl_mode  = "blend",
+	})
 end
 
 ---@param msg string
@@ -239,10 +240,8 @@ local function _center_for_previewer(msg, width, height)
 	local pad_top = math.max(0, math.floor((height - 1) / 2))
 
 	local lines = {}
-	for _ = 1, pad_top do
-		table.insert(lines, "")
-	end
-	table.insert(lines, centered)
+	for i = 1, pad_top do lines[i] = "" end
+	lines[pad_top + 1] = centered
 	return lines
 end
 
@@ -346,8 +345,8 @@ end
 local function _item_label(item)
 	if not item.label_chunks then return "" end
 	local parts = {}
-	for _, chunk in ipairs(item.label_chunks) do
-		table.insert(parts, chunk[1] or "")
+	for i, chunk in ipairs(item.label_chunks) do
+		parts[i] = chunk[1] or ""
 	end
 	return _one_line(table.concat(parts))
 end
@@ -366,6 +365,7 @@ end
 ---@field vwin integer?
 ---@field pwin_augroup number?
 ---@field spinner ezpick.util.Spinner?
+---@field _spinner_delay_timer table? -- pending timer that would start the spinner, nil once it has fired or been cancelled
 ---@field closed boolean
 ---@field list_items ezpick.picker.ListItem[]
 ---@field async_fetch_context number
@@ -560,15 +560,6 @@ function Picker:setup_ui()
 	end, { buffer = self.pbuf, desc = "Paste original <cword>" })
 end
 
----Indent wrapped list lines so continuations are visually distinct from new
----entries: a continuation lines up under the label above it rather than under
----the prefix that label starts past.
----@return nil
-function Picker:_apply_wrap_indent()
-	if not self.lwin or not vim.api.nvim_win_is_valid(self.lwin) then return end
-	vim.wo[self.lwin].breakindent = true
-end
-
 ---Screen lines the query takes, wrapped to the prompt's current width. Neovim
 ---counts them: `nvim_win_text_height` measures the buffer as the window would
 ---draw it, wrapping, tabs, double-width characters and all.
@@ -604,6 +595,13 @@ function Picker:_sync_prompt_height()
 	end
 end
 
+---Take the picker down on the next tick, unless it is already going.
+---@return nil
+function Picker:_close_soon()
+	if self.closed then return end
+	vim.schedule(function() self:close() end)
+end
+
 ---Build the floats for the current editor size, creating whatever is not up yet
 ---and moving whatever is.
 function Picker:relayout()
@@ -636,44 +634,39 @@ function Picker:relayout()
 
 	-- The border is per float and comes from the layout: the prompt and the list
 	-- share one frame, each drawing the half of it that is theirs.
-	local base_cfg = {
-		relative = "editor",
-		style = "minimal",
-	}
-
-	local winhl = _WINHL
+	---@param cfg table Placement and border, read off the layout by the caller.
+	---@return table
+	local function float_cfg(cfg)
+		return vim.tbl_extend("force", { relative = "editor", style = "minimal" }, cfg)
+	end
 
 	---@return table
 	local function prompt_cfg()
-		return vim.tbl_extend("force", base_cfg, {
-			row = self.layout.prompt_row,
-			col = self.layout.prompt_col,
-			width = self.layout.prompt_width,
-			height = self.layout.prompt_height,
-			border = self.layout.prompt_border,
-			title = title,
+		local l = self.layout
+		return float_cfg {
+			row       = l.prompt_row,
+			col       = l.prompt_col,
+			width     = l.prompt_width,
+			height    = l.prompt_height,
+			border    = l.prompt_border,
+			title     = title,
 			title_pos = "center",
-		})
+		}
 	end
 
 	if not self.pwin then
 		if not self.pbuf then
 			self.pbuf = _create_buffer(true, function()
 				self.pbuf = nil
-				if not self.closed then
-					vim.schedule(function() self:close() end)
-				end
+				self:_close_soon()
 			end)
 		end
 		local pwin_augroup
-		self.pwin, pwin_augroup = ui.create_window(self.pbuf, true, prompt_cfg(),
-			function()
-				self.pwin = nil
-				if not self.closed then
-					vim.schedule(function() self:close() end)
-				end
-			end)
-		vim.wo[self.pwin].winhighlight = winhl
+		self.pwin, pwin_augroup = ui.create_window(self.pbuf, true, prompt_cfg(), function()
+			self.pwin = nil
+			self:_close_soon()
+		end)
+		vim.wo[self.pwin].winhighlight = _WINHL
 		-- A query longer than the frame is wrapped rather than scrolled sideways:
 		-- the float grows a line at a time to hold it, up to the even split with
 		-- the list that `layouts` caps it at.
@@ -689,9 +682,7 @@ function Picker:relayout()
 				local cfg = vim.api.nvim_win_get_config(win)
 				local is_float = cfg.relative and cfg.relative ~= ""
 				if not is_float and win ~= self.pwin and win ~= self.lwin and win ~= self.vwin then
-					vim.schedule(function()
-						self:close()
-					end)
+					self:_close_soon()
 				end
 			end
 		})
@@ -727,38 +718,37 @@ function Picker:relayout()
 	-- above the items, which is what the extra row of height pays for.
 	---@return table
 	local function list_cfg()
-		return vim.tbl_extend("force", base_cfg, {
-			row = self.layout.list_row,
-			col = self.layout.list_col,
-			width = self.layout.list_width,
-			height = self.layout.list_height + 1,
-			border = self.layout.list_border,
-		})
+		local l = self.layout
+		return float_cfg {
+			row    = l.list_row,
+			col    = l.list_col,
+			width  = l.list_width,
+			height = l.list_height + 1,
+			border = l.list_border,
+		}
 	end
 
 	if not self.lwin then
 		if not self.lbuf then
 			self.lbuf = _create_buffer(false, function()
 				self.lbuf = nil
-				if not self.closed then
-					vim.schedule(function() self:close() end)
-				end
+				self:_close_soon()
 			end)
 		end
-		self.lwin = ui.create_window(self.lbuf, false, list_cfg(),
-			function()
-				self.lwin = nil
-				if not self.closed then
-					vim.schedule(function() self:close() end)
-				end
-			end)
-		vim.wo[self.lwin].winhighlight = winhl
+		self.lwin = ui.create_window(self.lbuf, false, list_cfg(), function()
+			self.lwin = nil
+			self:_close_soon()
+		end)
+		vim.wo[self.lwin].winhighlight = _WINHL
 		vim.wo[self.lwin].wrap = self.opts.list_wrap ~= false
 		-- `wbr` is what `%=` stretches across the winbar; `eob` comes with the
 		-- window's `style = "minimal"`, and setting 'fillchars' here drops it.
 		vim.wo[self.lwin].fillchars = "eob: ,wbr:" .. _RULE
 		vim.wo[self.lwin].winbar = self:_status_winbar()
-		self:_apply_wrap_indent()
+		-- Indent wrapped list lines so continuations read as continuations: one
+		-- lines up under the label above it, not under the prefix that label
+		-- starts past.
+		vim.wo[self.lwin].breakindent = true
 	else
 		vim.api.nvim_win_set_config(self.lwin, list_cfg())
 	end
@@ -774,45 +764,38 @@ function Picker:relayout()
 		if row then self:move_cursor(row, true, true) end
 	end
 
+	---@return table
+	local function preview_cfg()
+		local l = self.layout
+		return float_cfg {
+			row    = l.preview_row,
+			col    = l.preview_col,
+			width  = l.preview_width,
+			height = l.preview_height,
+			border = l.preview_border,
+		}
+	end
+
 	if self.preview_enabled then
 		if not self.vwin then
 			if not self.vbuf then
-				self.vbuf = _create_buffer(false, function()
-					self.vbuf = nil
-				end, "hide")
+				self.vbuf = _create_buffer(false, function() self.vbuf = nil end, "hide")
 				local vbuf_key_opts = _key_opts_of(self.vbuf)
 				vim.keymap.set("n", "<CR>", function() self:confirm() end, vbuf_key_opts)
 				vim.keymap.set("n", "<Esc>", function() self:close() end, vbuf_key_opts)
 			end
-			self.vwin = ui.create_window(self.vbuf, false, {
-					relative = "editor",
-					style = "minimal",
-					border = self.layout.preview_border,
-					row = self.layout.preview_row,
-					col = self.layout.preview_col,
-					width = self.layout.preview_width,
-					height = self.layout.preview_height,
-				},
-				function()
-					self.vwin = nil
-					if self.vbuf then
-						vim.api.nvim_buf_delete(self.vbuf, { force = true })
-						self.vbuf = nil
-					end
-					if not self.closed then
-						vim.schedule(function() self:close() end)
-					end
-				end)
+			self.vwin = ui.create_window(self.vbuf, false, preview_cfg(), function()
+				self.vwin = nil
+				if self.vbuf then
+					vim.api.nvim_buf_delete(self.vbuf, { force = true })
+					self.vbuf = nil
+				end
+				self:_close_soon()
+			end)
 			vim.wo[self.vwin].wrap = true
-			vim.wo[self.vwin].winhighlight = winhl
+			vim.wo[self.vwin].winhighlight = _WINHL
 		else
-			vim.api.nvim_win_set_config(self.vwin, vim.tbl_extend("force", base_cfg, {
-				row = self.layout.preview_row,
-				col = self.layout.preview_col,
-				width = self.layout.preview_width,
-				height = self.layout.preview_height,
-				border = self.layout.preview_border,
-			}))
+			vim.api.nvim_win_set_config(self.vwin, preview_cfg())
 		end
 		self:update_preview()
 	end
@@ -907,14 +890,6 @@ function Picker:_render_prompt_marks(query)
 	self:_set_prompt_hint(_NS_CONTENT, shown[1].msg, "DiagnosticVirtualTextWarn", 100)
 end
 
----Redraw the rule so the current spinner frame appears or disappears. The
----spinner rides on the rule next to the count, so drawing it is just a status
----redraw.
----@return nil
-function Picker:render_spinner()
-	self:render_status()
-end
-
 ---The list's winbar: the rule below the prompt, with the spinner while a fetch
 ---is in flight and then the position counter at its right end. They live on the
 ---rule rather than on the prompt line so that a query long enough to reach the
@@ -937,16 +912,12 @@ function Picker:_status_winbar()
 	return "%#NonText#%=" .. text:gsub("%%", "%%%%")
 end
 
----Redraw the rule's right end. The rule is the list float's winbar, a
----window-local option, so this touches neither window config nor the prompt.
+---Redraw the rule's right end, which carries both the spinner and the position
+---counter. The rule is the list float's winbar, a window-local option, so this
+---touches neither window config nor the prompt.
 function Picker:render_status()
 	if not (self.lwin and vim.api.nvim_win_is_valid(self.lwin)) then return end
 	vim.wo[self.lwin].winbar = self:_status_winbar()
-end
-
----Kept as the name the count's own callers use; the rule carries the count.
-function Picker:render_position()
-	self:render_status()
 end
 
 function Picker:render_cursor()
@@ -1069,7 +1040,7 @@ function Picker:move_cursor(row, force, clamp)
 	end)
 
 	self:render_cursor()
-	self:render_position()
+	self:render_status()
 	self:update_preview()
 end
 
@@ -1120,34 +1091,23 @@ function Picker:update_preview()
 					self:release_external_preview_buf()
 					self._preview_external_buf = preview.bufnr
 					vim.api.nvim_win_set_buf(self.vwin, preview.bufnr)
-					vim.wo[self.vwin].winhighlight =
-						_WINHL -- nvim_win_set_buf mutates winhighlight (drops EndOfBuffer remap)
+					self:_reset_preview_winhl()
 					_apply_preview_pos(self.vwin, preview.bufnr, preview.pos, preview.pos_end)
 				end
 				return
 			end
 
-			if self._preview_external_buf and self.vwin and vim.api.nvim_win_is_valid(self.vwin) then
-				pcall(vim.api.nvim_win_set_buf, self.vwin, self.vbuf)
-				vim.wo[self.vwin].winhighlight =
-					_WINHL -- nvim_win_set_buf mutates winhighlight (drops EndOfBuffer remap)
-				self:release_external_preview_buf()
-			end
+			self:_restore_preview_buf()
 
 			local content = preview.content
 			local lines ---@type string[]
-			if content then
-				if type(content) == "string" then
-					lines = vim.split(content, "\n")
-				else
-					lines = content
-				end
-			elseif preview.error_msg then
-				lines = _center_for_previewer(preview.error_msg, preview_width, preview_height)
+			if type(content) == "string" then
+				lines = vim.split(content, "\n")
+			elseif content then
+				lines = content
 			else
-				lines = _center_for_previewer("No preview", preview_width, preview_height)
+				lines = _center_for_previewer(preview.error_msg or "No preview", preview_width, preview_height)
 			end
-			lines = lines or {}
 			if self.vbuf then
 				vim.bo[self.vbuf].modifiable = true
 				vim.api.nvim_buf_set_lines(self.vbuf, 0, -1, false, lines)
@@ -1175,7 +1135,7 @@ function Picker:start_spinner()
 				interval = 100,
 				on_update = function(frame)
 					self._spinner_frame = frame
-					self:render_spinner()
+					self:render_status()
 				end
 			}
 			self.spinner:start()
@@ -1193,7 +1153,7 @@ function Picker:stop_spinner()
 		self.spinner = nil
 	end
 	self._spinner_frame = nil
-	self:render_spinner()
+	self:render_status()
 end
 
 function Picker:release_external_preview_buf()
@@ -1203,21 +1163,34 @@ function Picker:release_external_preview_buf()
 	self._preview_external_buf = nil
 end
 
+---Show the preview window's own buffer again, undoing a previewer that swapped
+---one of its own in, and let that one go.
+---@return nil
+function Picker:_restore_preview_buf()
+	if not self._preview_external_buf then return end
+	if self.vwin and vim.api.nvim_win_is_valid(self.vwin) then
+		pcall(vim.api.nvim_win_set_buf, self.vwin, self.vbuf)
+		self:_reset_preview_winhl()
+	end
+	self:release_external_preview_buf()
+end
+
+---`nvim_win_set_buf` mutates 'winhighlight' (it drops the EndOfBuffer remap), so
+---every buffer swap in the preview window has to put it back.
+---@return nil
+function Picker:_reset_preview_winhl()
+	vim.wo[self.vwin].winhighlight = _WINHL
+end
+
 ---@param immediate  boolean?
 function Picker:request_clear_preview(immediate)
 	local clear = function()
-		if self.vbuf and not self.closed then
-			if self._preview_external_buf and self.vwin and vim.api.nvim_win_is_valid(self.vwin) then
-				pcall(vim.api.nvim_win_set_buf, self.vwin, self.vbuf)
-				vim.wo[self.vwin].winhighlight =
-					_WINHL -- nvim_win_set_buf mutates winhighlight (drops EndOfBuffer remap)
-			end
-			self:release_external_preview_buf()
-			vim.bo[self.vbuf].modifiable = true
-			vim.api.nvim_buf_set_lines(self.vbuf, 0, -1, false, {})
-			vim.bo[self.vbuf].modifiable = false
-			vim.api.nvim_buf_clear_namespace(self.vbuf, _NS_PREVIEW, 0, -1)
-		end
+		if not self.vbuf or self.closed then return end
+		self:_restore_preview_buf()
+		vim.bo[self.vbuf].modifiable = true
+		vim.api.nvim_buf_set_lines(self.vbuf, 0, -1, false, {})
+		vim.bo[self.vbuf].modifiable = false
+		vim.api.nvim_buf_clear_namespace(self.vbuf, _NS_PREVIEW, 0, -1)
 	end
 	if immediate then
 		self:cancel_clear_preview_req()
@@ -1235,22 +1208,13 @@ function Picker:cancel_clear_preview_req()
 end
 
 function Picker:clear_list()
+	-- Set first: `set_items` is a no-op without a list buffer, and the list has
+	-- to read as empty either way.
 	self.list_items = {}
-	if not self.lbuf then return end
-
-	vim.bo[self.lbuf].modifiable = true
-	vim.api.nvim_buf_set_lines(self.lbuf, 0, -1, false, {})
-	vim.bo[self.lbuf].modifiable = false
-	if self.lwin and vim.api.nvim_win_is_valid(self.lwin) then
-		vim.wo[self.lwin].cursorline = false
-	end
-
-	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_CONTENT, 0, -1)
-	vim.api.nvim_buf_clear_namespace(self.lbuf, _NS_VLINE, 0, -1)
-	self._vline_row = nil
+	self:set_items({})
 	self:request_clear_preview()
 	self:render_cursor()
-	self:render_position()
+	self:render_status()
 end
 
 ---@param items (ezpick.Picker.Item|ezpick.picker.ListItem)[]?
@@ -1415,14 +1379,6 @@ function Picker:run_fetch()
 	end
 end
 
-function Picker:_apply_history_entry(q)
-	self.query_text = q
-	vim.api.nvim_buf_set_lines(self.pbuf, 0, -1, false, { q })
-	vim.api.nvim_win_set_cursor(self.pwin, { 1, #q })
-	self:render_prompt_highlight(q)
-	self:run_fetch()
-end
-
 function Picker:history_prev()
 	if not self.opts.history_provider or #self.history == 0 then return end
 
@@ -1433,7 +1389,7 @@ function Picker:history_prev()
 	local new_idx = math.max(1, self.history_idx - 1)
 	if new_idx ~= self.history_idx then
 		self.history_idx = new_idx
-		self:_apply_history_entry(_decode_history(self.history[self.history_idx]))
+		self:set_prompt_text(_decode_history(self.history[self.history_idx]))
 	end
 end
 
@@ -1443,15 +1399,17 @@ function Picker:history_next()
 	local new_idx = self.history_idx + 1
 	if new_idx <= #self.history then
 		self.history_idx = new_idx
-		self:_apply_history_entry(_decode_history(self.history[self.history_idx]))
+		self:set_prompt_text(_decode_history(self.history[self.history_idx]))
 	elseif new_idx == #self.history + 1 then
 		self.history_idx         = new_idx
 		local q                  = self.history_saved_query or ""
 		self.history_saved_query = nil
-		self:_apply_history_entry(q)
+		self:set_prompt_text(q)
 	end
 end
 
+---Replace the query with `text`, put the cursor at its end and refetch.
+---@param text string
 function Picker:set_prompt_text(text)
 	self.query_text = text
 	vim.api.nvim_buf_set_lines(self.pbuf, 0, -1, false, { text })
@@ -1463,25 +1421,24 @@ end
 function Picker:send_to_qf()
 	if #self.list_items == 0 then return end
 	local qf_entries = {} ---@type vim.quickfix.entry[]
+	local formatter  = self.opts.quickfix_formatter
 
-	if self.opts.quickfix_formatter then
-		for _, item in ipairs(self.list_items) do
-			local entry = self.opts.quickfix_formatter(item.data)
-			if entry then table.insert(qf_entries, entry) end
-		end
-	else
-		for _, item in ipairs(self.list_items) do
+	for _, item in ipairs(self.list_items) do
+		local entry ---@type vim.quickfix.entry?
+		if formatter then
+			entry = formatter(item.data)
+		else
 			local data = item.data or {}
-			---@type vim.quickfix.entry
-			local entry = {
+			entry = {
 				text     = _item_label(item),
 				filename = data.filepath,
 				lnum     = data.lnum or 1,
 				col      = data.col or 1,
 			}
-			table.insert(qf_entries, entry)
 		end
+		if entry then qf_entries[#qf_entries + 1] = entry end
 	end
+
 	if #qf_entries > 0 then
 		self:close()
 		vim.fn.setqflist(qf_entries, "r")
@@ -1602,108 +1559,105 @@ function Picker:toggle_prompt_section()
 end
 
 function Picker:setup_input()
-	do
-		local pbuf_key_opts = _key_opts_of(self.pbuf)
-		vim.keymap.set("n", "g?", _show_help, pbuf_key_opts)
+	local pbuf_key_opts = _key_opts_of(self.pbuf)
+	local expr_opts     = vim.tbl_extend("force", pbuf_key_opts, { expr = true })
+	local has_flags     = #self.opts.flags > 0
 
-		vim.keymap.set({ "i", "n" }, "<CR>", function() self:confirm() end, pbuf_key_opts)
+	---Step the selection by one row. With no selection yet, either end wraps
+	---onto the row nearest it.
+	---@param delta 1|-1
+	local function step(delta)
+		self:move_cursor((self:get_cursor() or (delta > 0 and 0 or 1)) + delta)
+	end
 
-		vim.keymap.set("n", "<Esc>", function() self:close() end, pbuf_key_opts)
-		vim.keymap.set("i", "<C-c>", function() self:close() end, pbuf_key_opts)
-
-		local expr_opts = vim.tbl_extend("force", pbuf_key_opts, { expr = true })
-
-		vim.keymap.set("n", "<C-n>", function() self:move_cursor((self:get_cursor() or 0) + 1) end, pbuf_key_opts)
-		vim.keymap.set("n", "<C-p>", function() self:move_cursor((self:get_cursor() or 1) - 1) end, pbuf_key_opts)
-
-		vim.keymap.set("i", "<C-n>", function()
-			if vim.fn.pumvisible() == 1 then return "<C-n>" end
-			self:move_cursor((self:get_cursor() or 0) + 1)
+	---Same, but handing the key back to the completion menu while one is open.
+	---@param delta 1|-1
+	---@param key string
+	---@return fun():string
+	local function step_or_pum(delta, key)
+		return function()
+			if vim.fn.pumvisible() == 1 then return key end
+			step(delta)
 			return ""
-		end, expr_opts)
-		vim.keymap.set("i", "<C-p>", function()
-			if vim.fn.pumvisible() == 1 then return "<C-p>" end
-			self:move_cursor((self:get_cursor() or 1) - 1)
-			return ""
-		end, expr_opts)
-
-		vim.keymap.set("i", "<Down>", function()
-			if vim.fn.pumvisible() == 1 then return "<Down>" end
-			self:move_cursor((self:get_cursor() or 0) + 1)
-			return ""
-		end, expr_opts)
-		vim.keymap.set("i", "<Up>", function()
-			if vim.fn.pumvisible() == 1 then return "<Up>" end
-			self:move_cursor((self:get_cursor() or 1) - 1)
-			return ""
-		end, expr_opts)
-
-		vim.keymap.set({ "i", "n" }, "<C-d>", function()
-			local cur = self:get_cursor()
-			if cur then
-				local step = math.floor(self.layout.list_height / 2)
-				self:move_cursor(cur + step, false, true)
-			end
-		end, pbuf_key_opts)
-
-		vim.keymap.set({ "i", "n" }, "<C-u>", function()
-			local cur = self:get_cursor()
-			if cur then
-				local step = math.floor(self.layout.list_height / 2)
-				self:move_cursor(cur - step, false, true)
-			end
-		end, pbuf_key_opts)
-
-		vim.keymap.set("i", "<C-j>", function() self:history_next() end, pbuf_key_opts)
-		vim.keymap.set("i", "<C-k>", function() self:history_prev() end, pbuf_key_opts)
-
-		vim.keymap.set("n", "j", function() self:history_next() end, pbuf_key_opts)
-		vim.keymap.set("n", "k", function() self:history_prev() end, pbuf_key_opts)
-
-		vim.keymap.set({ "n", "i" }, "<C-q>", function() self:send_to_qf() end, pbuf_key_opts)
-
-		if #self.opts.flags > 0 then
-			vim.keymap.set({ "i", "n" }, "<C-f>", function() self:toggle_prompt_section() end, pbuf_key_opts)
 		end
+	end
 
-		vim.keymap.set("i", "<C-Space>", function()
-			vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true), "n", false)
-		end, pbuf_key_opts)
+	---@param dir 1|-1
+	---@return fun()
+	local function half_page(dir)
+		return function()
+			local cur = self:get_cursor()
+			if cur then
+				self:move_cursor(cur + dir * math.floor(self.layout.list_height / 2), false, true)
+			end
+		end
+	end
 
-		vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+	vim.keymap.set("n", "g?", _show_help, pbuf_key_opts)
+
+	vim.keymap.set({ "i", "n" }, "<CR>", function() self:confirm() end, pbuf_key_opts)
+
+	vim.keymap.set("n", "<Esc>", function() self:close() end, pbuf_key_opts)
+	vim.keymap.set("i", "<C-c>", function() self:close() end, pbuf_key_opts)
+
+	vim.keymap.set("n", "<C-n>", function() step(1) end, pbuf_key_opts)
+	vim.keymap.set("n", "<C-p>", function() step(-1) end, pbuf_key_opts)
+
+	vim.keymap.set("i", "<C-n>", step_or_pum(1, "<C-n>"), expr_opts)
+	vim.keymap.set("i", "<C-p>", step_or_pum(-1, "<C-p>"), expr_opts)
+	vim.keymap.set("i", "<Down>", step_or_pum(1, "<Down>"), expr_opts)
+	vim.keymap.set("i", "<Up>", step_or_pum(-1, "<Up>"), expr_opts)
+
+	vim.keymap.set({ "i", "n" }, "<C-d>", half_page(1), pbuf_key_opts)
+	vim.keymap.set({ "i", "n" }, "<C-u>", half_page(-1), pbuf_key_opts)
+
+	vim.keymap.set("i", "<C-j>", function() self:history_next() end, pbuf_key_opts)
+	vim.keymap.set("i", "<C-k>", function() self:history_prev() end, pbuf_key_opts)
+
+	vim.keymap.set("n", "j", function() self:history_next() end, pbuf_key_opts)
+	vim.keymap.set("n", "k", function() self:history_prev() end, pbuf_key_opts)
+
+	vim.keymap.set({ "n", "i" }, "<C-q>", function() self:send_to_qf() end, pbuf_key_opts)
+
+	if has_flags then
+		vim.keymap.set({ "i", "n" }, "<C-f>", function() self:toggle_prompt_section() end, pbuf_key_opts)
+	end
+
+	vim.keymap.set("i", "<C-Space>", function()
+		vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true), "n", false)
+	end, pbuf_key_opts)
+
+	vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+		buffer = self.pbuf,
+		callback = function(ev)
+			self:apply_prompt()
+			if ev.event == "TextChangedI" then self:maybe_autocomplete() end
+		end
+	})
+
+	-- Which hints are held depends on where the cursor is, so leaving a
+	-- half-written flag has to be an event of its own: without this the
+	-- hint waits for the next keystroke, and a query finished with a typo
+	-- in it -- nothing left to type -- never says anything at all.
+	if has_flags then
+		vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
 			buffer = self.pbuf,
-			callback = function(ev)
-				self:apply_prompt()
-				if ev.event == "TextChangedI" then self:maybe_autocomplete() end
+			callback = function()
+				if self.closed or not self.pwin then return end
+				-- Typing moves the cursor too, and the text path has just
+				-- drawn these same hints for this same column.
+				if vim.api.nvim_win_get_cursor(self.pwin)[2] == self._hint_col then return end
+				-- Not query_text: completion rewrites the line without a
+				-- TextChangedI, so the cached query can lag behind it.
+				self:render_prompt_highlight(vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "")
+				self:render_status()
 			end
 		})
-
-		-- Which hints are held depends on where the cursor is, so leaving a
-		-- half-written flag has to be an event of its own: without this the
-		-- hint waits for the next keystroke, and a query finished with a typo
-		-- in it -- nothing left to type -- never says anything at all.
-		if #self.opts.flags > 0 then
-			vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
-				buffer = self.pbuf,
-				callback = function()
-					if self.closed or not self.pwin then return end
-					-- Typing moves the cursor too, and the text path has just
-					-- drawn these same hints for this same column.
-					if vim.api.nvim_win_get_cursor(self.pwin)[2] == self._hint_col then return end
-					-- Not query_text: completion rewrites the line without a
-					-- TextChangedI, so the cached query can lag behind it.
-					self:render_prompt_highlight(vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "")
-					self:render_position()
-				end
-			})
-		end
 	end
 
-	do
-		local lbuf_key_opts = _key_opts_of(self.lbuf)
-		vim.keymap.set("n", "<Esc>", function() self:close() end, lbuf_key_opts)
-		vim.keymap.set("n", "<CR>", function() self:confirm() end, lbuf_key_opts)
-	end
+	local lbuf_key_opts = _key_opts_of(self.lbuf)
+	vim.keymap.set("n", "<Esc>", function() self:close() end, lbuf_key_opts)
+	vim.keymap.set("n", "<CR>", function() self:confirm() end, lbuf_key_opts)
 end
 
 --- Buffer-local 'omnifunc'/'completefunc' for picker flag completion. The flag schema is
