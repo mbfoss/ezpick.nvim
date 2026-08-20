@@ -149,8 +149,7 @@ local function _show_help()
 `<C-k>`       Previous search history entry
 `j` / `k`     Next / previous history entry (normal mode)
 `<C-Space>`   Complete flags
-`<C-t>`       Jump between the flags and the query
-`<C-f>`       Start a new flag in the flags section
+`<C-f>`       Jump between the flags and the query
 `<C-q>`       Send results to quickfix list
 `<C-r><C-w>`  Insert original <cword>
 `g?`          Show help
@@ -1583,32 +1582,23 @@ function Picker:_prompt_sections()
 end
 
 ---Move the cursor between the end of the flags section and the end of the query.
+---Moving into the flags section inserts a space when text follows the cursor,
+---so a flag typed there does not run into it.
 function Picker:toggle_prompt_section()
 	if not self.pwin then return end
 	local line, flags_end = self:_prompt_sections()
 	local col             = vim.api.nvim_win_get_cursor(self.pwin)[2]
-	vim.api.nvim_win_set_cursor(self.pwin, { 1, col > flags_end and flags_end or #line })
-end
 
----Open a new flag at the end of the flags section and put the cursor in it,
----keeping a space between it and whatever follows.
-function Picker:insert_flag()
-	if not self.pwin then return end
-	local line, flags_end = self:_prompt_sections()
-	local col             = vim.api.nvim_win_get_cursor(self.pwin)[2]
-
-	-- Already writing a flag: the cursor is where a new one would put it.
-	local word = line:sub(1, col):match("%S*$")
-	if word:sub(1, 1) == "-" and col - #word <= flags_end then return end
+	if col <= flags_end then
+		vim.api.nvim_win_set_cursor(self.pwin, { 1, #line })
+		return
+	end
 
 	local rest = line:sub(flags_end + 1)
-	local pre  = flags_end > 0 and " " or ""
-	local post = rest:sub(1, 1):match("%s") and "" or " "
-
-	vim.api.nvim_buf_set_lines(self.pbuf, 0, 1, false,
-		{ line:sub(1, flags_end) .. pre .. "--" .. post .. rest })
-	vim.api.nvim_win_set_cursor(self.pwin, { 1, flags_end + #pre + 2 })
-	vim.cmd("startinsert")
+	if rest ~= "" and not rest:sub(1, 1):match("%s") then
+		vim.api.nvim_buf_set_lines(self.pbuf, 0, 1, false, { line:sub(1, flags_end) .. " " .. rest })
+	end
+	vim.api.nvim_win_set_cursor(self.pwin, { 1, flags_end })
 end
 
 function Picker:setup_input()
@@ -1673,8 +1663,7 @@ function Picker:setup_input()
 		vim.keymap.set({ "n", "i" }, "<C-q>", function() self:send_to_qf() end, pbuf_key_opts)
 
 		if #self.opts.flags > 0 then
-			vim.keymap.set({ "i", "n" }, "<C-t>", function() self:toggle_prompt_section() end, pbuf_key_opts)
-			vim.keymap.set({ "i", "n" }, "<C-f>", function() self:insert_flag() end, pbuf_key_opts)
+			vim.keymap.set({ "i", "n" }, "<C-f>", function() self:toggle_prompt_section() end, pbuf_key_opts)
 		end
 
 		vim.keymap.set("i", "<C-Space>", function()
