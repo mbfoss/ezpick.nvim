@@ -79,7 +79,7 @@ An extra argument seeds the initial query:
 
 `:Pick` with no argument lists the available sources through `vim.ui.select`.
 
-### Built-in sources
+### Built-ins
 
 | Source | What it lists |
 | --- | --- |
@@ -141,7 +141,7 @@ Inside a picker, `g?` shows the full list:
 | `<C-q>` | Send results to the quickfix list |
 | `<C-r><C-w>` | Insert the original `<cword>` |
 
-### Query flags
+### Flags
 
 Sources can accept inline flags in the query. **Flags go first**; everything
 from the first non-flag word onward is the query, verbatim — spaces, backslashes
@@ -195,7 +195,7 @@ several of which are OR'd together.
 :Pick live_grep --dir ~/src -- --hidden               " searches for "--hidden"
 ```
 
-## Registering your own source
+## Custom sources
 
 ```lua
 require("ezpick").register("my_source", {
@@ -221,7 +221,7 @@ A name that could never be opened is an error rather than a warning: the empty
 string, a name containing whitespace (`:Pick` splits its arguments on it), and
 `resume` (handled by `:Pick` before the registry is consulted).
 
-## Highlight groups
+## Highlights
 
 | Group | Links to |
 | --- | --- |

@@ -15,5 +15,10 @@ unit_test:
 .PHONY: test
 test: unit_test
 
+.PHONY: doc
+doc:
+	@scripts/gendoc.sh
 
-
+.PHONY: doc_check
+doc_check:
+	@scripts/gendoc.sh --check --diff
