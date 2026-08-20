@@ -234,6 +234,10 @@ Filetype icons in the file picker come from
 highlighted with its `KeystoneIcons*` groups) when that plugin is installed.
 Without it, rows are rendered without icons.
 
+<!-- panvimdoc-ignore-start -->
+
 ## License
 
 [MIT](LICENSE). See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for third-party credits.
+
+<!-- panvimdoc-ignore-end -->
