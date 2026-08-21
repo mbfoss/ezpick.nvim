@@ -266,7 +266,11 @@ describe("picker query hints", function()
     end)
 
     it("passes the query through byte for byte", function()
-        local query = type_query("--hidden foo  bar ")
-        assert.are.equal("foo  bar ", query)
+        local query = type_query("--hidden -- foo  bar")
+        assert.are.equal("foo  bar", query)
+    end)
+
+    it("trims the space around the query", function()
+        assert.are.equal("foo  bar", type_query("--hidden foo  bar  "))
     end)
 end)

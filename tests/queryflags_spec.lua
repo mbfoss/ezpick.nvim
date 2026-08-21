@@ -59,11 +59,18 @@ describe("queryflags query", function()
         assert.are.equal("hello world", r.query)
     end)
 
-    it("keeps the query verbatim", function()
+    it("keeps the inner spacing of the query", function()
         -- the whole point of the ordering: a literal search gets exactly the
-        -- bytes that were typed, inner spacing and all.
-        local r = qf.parse(schema, "--fixed  a  b   c ")
-        assert.are.equal("a  b   c ", r.query)
+        -- bytes that were typed between its ends.
+        local r = qf.parse(schema, "--fixed  a  b   c")
+        assert.are.equal("a  b   c", r.query)
+    end)
+
+    it("trims the space around the query", function()
+        -- the space either side is only the gap around the flags, not typed at
+        -- the query.
+        assert.are.equal("a  b", qf.parse(schema, "--fixed  a  b   ").query)
+        assert.are.equal("a  b", qf.parse(schema, "  a  b  ").query)
     end)
 
     it("reports where the query starts", function()
@@ -164,10 +171,15 @@ describe("queryflags literal separator", function()
         assert.are.same({}, hints_of(qf.parse(schema, "--fixed -- a -- b"), "late-separator"))
     end)
 
-    it("keeps the query after it verbatim", function()
+    it("keeps the inner spacing of the query after it", function()
         local r = qf.parse(schema, '--fixed -- a  "b" -- c ')
         assert.is_true(r.flags.fixed)
-        assert.are.equal('a  "b" -- c ', r.query)
+        assert.are.equal('a  "b" -- c', r.query)
+    end)
+
+    it("trims the space around the query after it", function()
+        assert.are.equal("a", qf.parse(schema, "--fixed --   a ").query)
+        assert.are.equal("", qf.parse(schema, "--  ").query)
     end)
 
     it("is not a separator when glued to other text", function()

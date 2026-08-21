@@ -27,7 +27,8 @@ local M = {}
 ---                        -- while the cursor is still inside the span
 
 ---@class ezpick.queryflags.ParseResult
----@field query       string  -- the query, verbatim: every byte from where the flags stop
+---@field query       string  -- the query: the text from where the flags stop,
+---                     -- surrounding space trimmed, inner spacing verbatim
 ---@field query_start integer -- 1-indexed byte offset where `query` begins (#raw+1 when empty)
 ---@field flags       table   -- {[name] = true | string | string[]}
 ---@field hints       ezpick.queryflags.Hint[]
@@ -420,8 +421,12 @@ function M.parse(schema, raw)
 
     table.sort(hints, function(a, b) return a.start < b.start end)
 
+    -- The spacing around the query is the gap between it and the flags, not
+    -- part of what was searched for: trimmed. Inner spacing stands.
+    local query = raw:sub(query_start):match("^(.-)%s*$")
+
     return {
-        query       = raw:sub(query_start),
+        query       = query,
         query_start = query_start,
         flags       = flags,
         hints       = hints,
