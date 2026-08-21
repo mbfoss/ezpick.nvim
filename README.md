@@ -228,7 +228,7 @@ string, a name containing whitespace (`:Pick` splits its arguments on it), and
 
 | Group | Links to |
 | --- | --- |
-| `EzPickMatch` | `Label` |
+| `EzPickMatch` | `Visual` |
 | `EzPickPath` | `@namespace` |
 | `EzPickBufferIndicator` | `Special` |
 
