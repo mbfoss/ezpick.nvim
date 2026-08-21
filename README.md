@@ -168,9 +168,12 @@ and `--hidden=true` are the same mistake, and both leave the switch alone rather
 than guess which reading was meant.
 
 A standalone `--` ends the flagged section, for the one case that needs it: a
-query starting with a flag name.
+query starting with a flag name. Only flags go in front of it: a `--`
+written once the query has started cannot end a section that already ended, so
+the picker underlines it, reports the word before it as an invalid flag, and
+searches for nothing until the line is one reading or the other.
 
-Mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, a
+Other mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, a
 value outside a flag's set or a flag written after the query gets an underline
 and a short hint under the prompt, while the search keeps running on a
 best-effort reading. A hint about the flag the cursor is still inside waits

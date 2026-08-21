@@ -21,6 +21,7 @@ local M = {}
 ---| "missing-value"    -- a value flag with nothing to take
 ---| "bad-value"        -- a value outside a strict flag's `values`
 ---| "unexpected-value" -- a value glued onto a switch
+---| "late-separator"   -- a bare "--" written once the query has started
 
 ---Advisory only: `parse` always returns a usable query beside its hints, and
 ---reports the half-written states a correct flag passes through too. Telling
@@ -204,6 +205,24 @@ local function _spanned_parts(piece)
     return out
 end
 
+---Mark every bare "--" written from `from` on. Only flags stand in front of the
+---separator, and the query has already started here, so the word that started it
+---is where the mistake is: the "--" itself is beyond saving, and says so.
+---@param str  string
+---@param from integer -- 1-indexed start of the query
+---@param hint fun(kind:ezpick.queryflags.HintKind, s:integer, e:integer, msg:string, settled:boolean?)
+local function _hint_late_separators(str, from, hint)
+    local i = from
+    while i <= #str do
+        local s, e = str:find("%S+", i)
+        if not s then break end
+        if str:sub(s, e) == _PREFIX then
+            hint("late-separator", s, e, ("invalid flag before %s"):format(_PREFIX), true)
+        end
+        i = e + 1
+    end
+end
+
 ---Walk the flagged prefix of `str`, stopping at the query.
 ---@param str    string
 ---@param defs   table<string, ezpick.queryflags.FlagDef>
@@ -260,6 +279,7 @@ local function _scan(str, defs)
                 assert(name_end)
                 hint("unknown-flag", tok_start, name_end, ("unknown option %s%s"):format(_PREFIX, name))
             end
+            _hint_late_separators(str, tok_start, hint)
             return pieces, tok_start, hints, nil
         end
 

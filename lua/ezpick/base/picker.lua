@@ -117,11 +117,20 @@ local _RULE              = "─"
 ---@type string
 local _HINT_ICON = "󰀪 "
 
+---Hints the search will not run against: the query they mark has no single
+---reading, so a best-effort one would search for something other than what is
+---written. Every other mistake is pointed out and searched around.
+---@type table<ezpick.queryflags.HintKind, boolean>
+local _BLOCKING = {
+	["late-separator"] = true,
+}
+
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
-	["missing-value"] = true,
-	["unknown-flag"]  = true,
-	["bad-value"]     = true,
+	["late-separator"] = true,
+	["missing-value"]  = true,
+	["unknown-flag"]   = true,
+	["bad-value"]      = true,
 }
 
 ---Whether the cursor is still in the span `hint` points at: it counts as inside
@@ -1303,6 +1312,19 @@ local function _resolve_initial_cursor(items, initial_cursor)
 end
 
 function Picker:run_fetch()
+	local cancel = function()
+		if self.async_fetch_cancel then
+			self.async_fetch_cancel()
+			self.async_fetch_cancel = nil
+		end
+		-- A callback already on its way in belongs to a context nothing waits for.
+		self.async_fetch_context = self.async_fetch_context + 1
+		self:stop_spinner()
+		self:clear_list()
+		self._last_clean_query = nil
+		self._last_flags       = nil
+	end
+
 	local query_text = self.query_text
 
 	---@type ezpick.Picker.FetcherOpts
@@ -1318,11 +1340,19 @@ function Picker:run_fetch()
 	if #self.opts.flags > 0 then
 		-- `parse` never refuses: a half-typed escape or an unknown flag yields a
 		-- hint beside a best-effort query, so the list keeps up with the typing
-		-- instead of emptying at the first character of a mistake.
+		-- instead of emptying at the first character of a mistake. The one
+		-- exception is a hint in `_BLOCKING`, which leaves nothing to search for.
 		local parsed      = queryflags.parse(self.opts.flags, query_text)
 		clean_query       = parsed.query
 		flags             = parsed.flags
 		fetch_opts.parsed = parsed
+
+		for _, hint in ipairs(parsed.hints) do
+			if _BLOCKING[hint.kind] then
+				cancel()
+				return
+			end
+		end
 	else
 		clean_query = query_text
 		flags       = {}

@@ -60,7 +60,10 @@ tests/                   plenary busted specs
   token (`--type lua,rust`) and comes back as a `string[]`; every flag is
   written at most once, and a repetition is hinted with the last one winning. A
   standalone `--` ends the flagged section for a query that must start with a
-  flag name. `parse` never fails on what was typed: anything doubtful comes back
+  flag name; one written after the query has started is hinted `late-separator`,
+  the single hint the picker refuses to search on (`_BLOCKING` in `picker.lua`)
+  since the query would read as split around it. `parse` never fails on what was
+  typed: anything doubtful comes back
   as an advisory `ParseResult.hints` entry beside a usable query, which the
   picker underlines in the prompt rather than acting on. (A malformed *schema*
   does fail, at once — `strict` without `values` asserts.) Every problem is

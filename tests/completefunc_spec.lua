@@ -250,6 +250,16 @@ describe("picker query hints", function()
         assert.are.equal(2, marked)
     end)
 
+    it("refuses to search a query a bare -- splits in two", function()
+        -- The "--" reads as the separator but cannot act as one here, so what is
+        -- meant is unclear: the finder is never asked, leaving the empty query
+        -- the picker opened on as the last one that ran.
+        local query, _, hint, marked = type_query("a -- b")
+        assert.are.equal("", query)
+        assert.is_truthy(hint:find("invalid flag before --", 1, true))
+        assert.are.equal(1, marked)
+    end)
+
     it("passes the query through byte for byte", function()
         local query = type_query("--hidden foo  bar ")
         assert.are.equal("foo  bar ", query)
