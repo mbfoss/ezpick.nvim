@@ -201,7 +201,7 @@ end
 --- schemes while a picker is open (the `colorschemes` source) has to call this
 --- again afterwards.
 function M.apply_highlights()
-    vim.api.nvim_set_hl(0, "EzPickMatch", { default = true, link = "Label" })
+    vim.api.nvim_set_hl(0, "EzPickMatch", { default = true, link = "Visual" })
     vim.api.nvim_set_hl(0, "EzPickPath", { default = true, link = "@namespace" })
     vim.api.nvim_set_hl(0, "EzPickBufferIndicator", { default = true, link = "Special" })
 end

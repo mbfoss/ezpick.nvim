@@ -68,15 +68,14 @@ end
 
 --- Strip surrounding whitespace for display, shifting the submatch offsets to
 --- match. Trimming never eats into a submatch (a query can match whitespace),
---- so the highlighted spans stay exact. Display only — `data.subs` keeps the
---- original offsets into the untrimmed line.
+--- so whitespace that is part of the result is kept. Display only — `data.subs`
+--- keeps the original offsets into the untrimmed line.
 ---@param text string
 ---@param subs ezpick.rgutil.Submatch[]
 ---@return string text, ezpick.rgutil.Submatch[] subs
 local function trim_for_display(text, subs)
-    local first = text:match("^%s*")
-    local lead  = #first
-    local tail  = #text - #(text:match("%s*$"))
+    local lead = #text:match("^%s*")
+    local tail = #text - #text:match("%s*$")
     for _, sm in ipairs(subs) do
         if sm.s < lead then lead = sm.s end
         if sm.e > tail then tail = sm.e end

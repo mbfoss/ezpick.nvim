@@ -170,7 +170,7 @@ than guess which reading was meant.
 A standalone `--` ends the flagged section, for the one case that needs it: a
 query starting with a flag name. Only flags go in front of it: a `--`
 written once the query has started cannot end a section that already ended, so
-the picker underlines it and reports the word before it as an invalid flag.
+the picker underlines the word that ended it and reports it as an invalid flag.
 
 Every mistake reads the same way. A typo'd flag, a forgotten value, a value
 outside a flag's set or a flag written after the query gets an underline and a
