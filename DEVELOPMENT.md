@@ -165,18 +165,18 @@ make doc          # rewrite doc/ezpick.txt and doc/tags
 make doc_check    # exit 1 when the help file is out of date
 ```
 
-Help tags come from a hidden comment on the line after a section heading, so a
+Help tags come from a hidden comment at the end of a section heading, so a
 heading can be renamed without breaking `:help` links:
 
 ```markdown
-## Writing your own source
-<!-- tag: ezpick-custom-sources -->
+## Writing your own source <!-- tag: custom-sources -->
 ```
 
-The comment is stripped before panvimdoc runs and never renders on GitHub. A
-heading without one keeps the tag panvimdoc derives from its text
-(`ezpick-<heading, lowercased, spaces to dashes>`). Tags are limited to
-`[A-Za-z0-9_-]`; anything else fails the build.
+The `ezpick-` prefix is added automatically, so that yields
+`*ezpick-custom-sources*`. The comment is stripped before panvimdoc runs and
+never renders on GitHub. A heading without one keeps the tag panvimdoc derives
+from its text (`ezpick-<heading, lowercased, spaces to dashes>`). Tags are
+limited to `[A-Za-z0-9_-]`; anything else fails the build.
 
 ## Coding style
 
