@@ -504,6 +504,7 @@ end
 
 ---@return nil
 function Picker:setup_ui()
+	self:_create_windows()
 	self:relayout()
 
 	assert(self.pbuf ~= nil)
@@ -586,48 +587,28 @@ function Picker:_close_soon()
 	vim.schedule(function() self:close() end)
 end
 
----Build the floats for the current editor size, creating whatever is not up yet
----and moving whatever is.
-function Picker:relayout()
-	if self.closed then return end
-	self._in_relayout = true
-	local opts = self.opts
-	local title = opts.prompt and (" " .. opts.prompt .. " ") or ""
+---Geometry of the picker's floats for the current editor size and prompt height.
+---@class ezpick.Picker.Cfgs
+---@field prompt table
+---@field list table
+---@field preview table
 
-	if vim.fn.pumvisible() == 1 then
-		vim.api.nvim_feedkeys(
-			vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false
-		)
-	end
-
-	---@param prompt_height integer
-	---@return ezpick.Picker.Layout
-	local function build(prompt_height)
-		return layouts.build(self.opts.layout, {
-			has_preview = self.preview_enabled,
-			height_ratio = self.opts.height_ratio,
-			width_ratio = self.opts.width_ratio,
-			prompt_height = prompt_height,
-		})
-	end
-
-	-- The wrapped query is measured off the prompt window, so the layout starts
-	-- from the height the prompt has now and is settled below, once the window
-	-- has been moved to the width this one gives it.
-	self.layout = build(self.layout and self.layout.prompt_height or 1)
+---Build the float configs off `self.layout`.
+---@return ezpick.Picker.Cfgs
+function Picker:_float_cfgs()
+	local l = self.layout
+	local title = self.opts.prompt and (" " .. self.opts.prompt .. " ") or ""
 
 	-- The border is per float and comes from the layout: the prompt and the list
 	-- share one frame, each drawing the half of it that is theirs.
-	---@param cfg table Placement and border, read off the layout by the caller.
+	---@param cfg table Placement and border, read off the layout.
 	---@return table
 	local function float_cfg(cfg)
 		return vim.tbl_extend("force", { relative = "editor", style = "minimal" }, cfg)
 	end
 
-	---@return table
-	local function prompt_cfg()
-		local l = self.layout
-		return float_cfg {
+	return {
+		prompt = float_cfg {
 			row       = l.prompt_row,
 			col       = l.prompt_col,
 			width     = l.prompt_width,
@@ -635,62 +616,179 @@ function Picker:relayout()
 			border    = l.prompt_border,
 			title     = title,
 			title_pos = "center",
-		}
-	end
+		},
+		-- The list has no top border: its first row is the winbar drawing the rule
+		-- above the items, which is what the extra row of height pays for.
+		list = float_cfg {
+			row    = l.list_row,
+			col    = l.list_col,
+			width  = l.list_width,
+			height = l.list_height + 1,
+			border = l.list_border,
+		},
+		preview = float_cfg {
+			row    = l.preview_row,
+			col    = l.preview_col,
+			width  = l.preview_width,
+			height = l.preview_height,
+			border = l.preview_border,
+		},
+	}
+end
 
-	if not self.pwin then
-		if not self.pbuf then
-			self.pbuf = _create_buffer(true, function()
-				self.pbuf = nil
+---Build the layout for the current editor size and the given prompt height.
+---@param prompt_height integer
+---@return ezpick.Picker.Layout
+function Picker:_build_layout(prompt_height)
+	return layouts.build(self.opts.layout, {
+		has_preview = self.preview_enabled,
+		height_ratio = self.opts.height_ratio,
+		width_ratio = self.opts.width_ratio,
+		prompt_height = prompt_height,
+	})
+end
+
+---Create the picker's floats, with the buffers, options and autocommands each of
+---them carries. Called once, when the picker goes up; `relayout` only moves what
+---this leaves behind.
+---@return nil
+function Picker:_create_windows()
+	assert(not self.pwin and not self.lwin and not self.vwin)
+	self.layout = self:_build_layout(1)
+	local cfgs = self:_float_cfgs()
+
+	self.pbuf = _create_buffer(true, function()
+		self.pbuf = nil
+		self:_close_soon()
+	end)
+	local pwin_augroup
+	self.pwin, pwin_augroup = ui.create_window(self.pbuf, true, cfgs.prompt, function()
+		self.pwin = nil
+		self:_close_soon()
+	end)
+	vim.wo[self.pwin].winhighlight = _WINHL
+	-- A query longer than the frame is wrapped rather than scrolled sideways:
+	-- the float grows a line at a time to hold it, up to the even split with
+	-- the list that `layouts` caps it at.
+	vim.wo[self.pwin].wrap = true
+
+	assert(type(pwin_augroup) == "number")
+	self.pwin_augroup = pwin_augroup
+	vim.api.nvim_create_autocmd("WinEnter", {
+		group = pwin_augroup,
+		callback = function(_)
+			local win = vim.api.nvim_get_current_win()
+			assert(not self.closed)
+			local cfg = vim.api.nvim_win_get_config(win)
+			local is_float = cfg.relative and cfg.relative ~= ""
+			if not is_float and win ~= self.pwin and win ~= self.lwin and win ~= self.vwin then
 				self:_close_soon()
+			end
+		end
+	})
+	vim.api.nvim_create_autocmd("VimResized", {
+		group = pwin_augroup,
+		callback = function()
+			assert(not self.closed)
+			vim.schedule(function()
+				self:relayout()
 			end)
 		end
-		local pwin_augroup
-		self.pwin, pwin_augroup = ui.create_window(self.pbuf, true, prompt_cfg(), function()
-			self.pwin = nil
+	})
+
+	self.lbuf = _create_buffer(false, function()
+		self.lbuf = nil
+		self:_close_soon()
+	end)
+	self.lwin = ui.create_window(self.lbuf, false, cfgs.list, function()
+		self.lwin = nil
+		self:_close_soon()
+	end)
+	vim.wo[self.lwin].winhighlight = _WINHL
+	vim.wo[self.lwin].wrap = self.opts.list_wrap ~= false
+	-- `wbr` is what `%=` stretches across the winbar; `eob` comes with the
+	-- window's `style = "minimal"`, and setting 'fillchars' here drops it.
+	vim.wo[self.lwin].fillchars = "eob: ,wbr:" .. _RULE
+	vim.wo[self.lwin].winbar = self:_status_winbar()
+	-- Indent wrapped list lines so continuations read as continuations: one
+	-- lines up under the label above it, not under the prefix that label
+	-- starts past.
+	vim.wo[self.lwin].breakindent = true
+
+	if self.preview_enabled then
+		self.vbuf = _create_buffer(false, function() self.vbuf = nil end, "hide")
+		local vbuf_key_opts = _key_opts_of(self.vbuf)
+		vim.keymap.set("n", "<CR>", function() self:confirm() end, vbuf_key_opts)
+		vim.keymap.set("n", "<Esc>", function() self:close() end, vbuf_key_opts)
+		self.vwin = ui.create_window(self.vbuf, false, cfgs.preview, function()
+			self.vwin = nil
+			if self.vbuf then
+				vim.api.nvim_buf_delete(self.vbuf, { force = true })
+				self.vbuf = nil
+			end
 			self:_close_soon()
 		end)
-		vim.wo[self.pwin].winhighlight = _WINHL
-		-- A query longer than the frame is wrapped rather than scrolled sideways:
-		-- the float grows a line at a time to hold it, up to the even split with
-		-- the list that `layouts` caps it at.
-		vim.wo[self.pwin].wrap = true
-
-		assert(type(pwin_augroup) == "number")
-		self.pwin_augroup = pwin_augroup
-		vim.api.nvim_create_autocmd("WinEnter", {
-			group = pwin_augroup,
-			callback = function(_)
-				local win = vim.api.nvim_get_current_win()
-				assert(not self.closed)
-				local cfg = vim.api.nvim_win_get_config(win)
-				local is_float = cfg.relative and cfg.relative ~= ""
-				if not is_float and win ~= self.pwin and win ~= self.lwin and win ~= self.vwin then
-					self:_close_soon()
-				end
-			end
-		})
-		vim.api.nvim_create_autocmd("VimResized", {
-			group = pwin_augroup,
-			callback = function()
-				assert(not self.closed)
-				vim.schedule(function()
-					self:relayout()
-				end)
-			end
-		})
-	else
-		vim.api.nvim_win_set_config(self.pwin, prompt_cfg())
+		vim.wo[self.vwin].wrap = true
+		vim.wo[self.vwin].winhighlight = _WINHL
 	end
+end
+
+---Move `win` to `cfg`, unless it already sits there. The comparison is against
+---the window's own geometry, so a config the picker never applied -- one the
+---window was created with, or moved to from outside -- counts as it should.
+---@param win integer?
+---@param cfg table
+---@return boolean moved
+function Picker:_resize_window(win, cfg)
+	if not win or not vim.api.nvim_win_is_valid(win) then return false end
+	local cur = vim.api.nvim_win_get_config(win)
+	if cur.relative == cfg.relative
+			and cur.row == cfg.row
+			and cur.col == cfg.col
+			and cur.width == cfg.width
+			and cur.height == cfg.height then
+		return false
+	end
+	vim.api.nvim_win_set_config(win, cfg)
+	return true
+end
+
+---Move the open floats to `cfgs`. Nothing else: the windows exist and keep the
+---buffers and options they were created with.
+---@param cfgs ezpick.Picker.Cfgs
+---@return boolean list_moved Whether the list window changed geometry.
+function Picker:_resize_windows(cfgs)
+	self:_resize_window(self.pwin, cfgs.prompt)
+	local list_moved = self:_resize_window(self.lwin, cfgs.list)
+	if self.preview_enabled then self:_resize_window(self.vwin, cfgs.preview) end
+	return list_moved
+end
+
+---Move the floats to the current editor size. The windows themselves are put up
+---once by `_create_windows`, at launch.
+function Picker:relayout()
+	if self.closed then return end
+	self._in_relayout = true
+
+	if vim.fn.pumvisible() == 1 then
+		vim.api.nvim_feedkeys(
+			vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false
+		)
+	end
+
+	-- The wrapped query is measured off the prompt window, so the layout starts
+	-- from the height the prompt has now and is settled below, once the window
+	-- has been moved to the width this one gives it.
+	self.layout = self:_build_layout(self.layout.prompt_height)
+	local list_moved = self:_resize_windows(self:_float_cfgs())
 
 	-- The prompt is where it will be and as wide as it will be, so what the query
 	-- wraps to can be measured. Only its height is still open, and only the rows
-	-- under it -- the list's -- answer to it; the widths and the preview do not,
-	-- so nothing already decided above has to be revisited.
+	-- under it -- the list's -- answer to it; the widths and the preview do not.
 	local wrapped = self:_prompt_text_height()
 	if wrapped ~= self.layout.prompt_height then
-		self.layout = build(wrapped)
-		vim.api.nvim_win_set_config(self.pwin, prompt_cfg())
+		self.layout = self:_build_layout(wrapped)
+		list_moved = self:_resize_windows(self:_float_cfgs()) or list_moved
 	end
 	-- What was measured, not what the layout granted: past the even split the
 	-- prompt stops growing, and the two part company. Comparing against the
@@ -698,91 +796,18 @@ function Picker:relayout()
 	-- relayout on every keystroke.
 	self._prompt_wrapped = wrapped
 
-	-- The list has no top border: its first row is the winbar drawing the rule
-	-- above the items, which is what the extra row of height pays for.
-	---@return table
-	local function list_cfg()
-		local l = self.layout
-		return float_cfg {
-			row    = l.list_row,
-			col    = l.list_col,
-			width  = l.list_width,
-			height = l.list_height + 1,
-			border = l.list_border,
-		}
-	end
-
-	if not self.lwin then
-		if not self.lbuf then
-			self.lbuf = _create_buffer(false, function()
-				self.lbuf = nil
-				self:_close_soon()
-			end)
-		end
-		self.lwin = ui.create_window(self.lbuf, false, list_cfg(), function()
-			self.lwin = nil
-			self:_close_soon()
-		end)
-		vim.wo[self.lwin].winhighlight = _WINHL
-		vim.wo[self.lwin].wrap = self.opts.list_wrap ~= false
-		-- `wbr` is what `%=` stretches across the winbar; `eob` comes with the
-		-- window's `style = "minimal"`, and setting 'fillchars' here drops it.
-		vim.wo[self.lwin].fillchars = "eob: ,wbr:" .. _RULE
-		vim.wo[self.lwin].winbar = self:_status_winbar()
-		-- Indent wrapped list lines so continuations read as continuations: one
-		-- lines up under the label above it, not under the prefix that label
-		-- starts past.
-		vim.wo[self.lwin].breakindent = true
-	else
-		vim.api.nvim_win_set_config(self.lwin, list_cfg())
-	end
-
 	-- The separators are drawn to the list width, so a list that survives a
 	-- relayout has to be laid out again against the new one -- otherwise every
 	-- separator keeps the length of the window the picker used to be. The
 	-- labels themselves were cropped by their source and stay as they are until
 	-- the next fetch re-crops them.
-	if #self.list_items > 0 then
+	if list_moved and #self.list_items > 0 then
 		local row = self:get_cursor()
 		self:set_items(self.list_items)
 		if row then self:move_cursor(row, true, true) end
 	end
 
-	---@return table
-	local function preview_cfg()
-		local l = self.layout
-		return float_cfg {
-			row    = l.preview_row,
-			col    = l.preview_col,
-			width  = l.preview_width,
-			height = l.preview_height,
-			border = l.preview_border,
-		}
-	end
-
-	if self.preview_enabled then
-		if not self.vwin then
-			if not self.vbuf then
-				self.vbuf = _create_buffer(false, function() self.vbuf = nil end, "hide")
-				local vbuf_key_opts = _key_opts_of(self.vbuf)
-				vim.keymap.set("n", "<CR>", function() self:confirm() end, vbuf_key_opts)
-				vim.keymap.set("n", "<Esc>", function() self:close() end, vbuf_key_opts)
-			end
-			self.vwin = ui.create_window(self.vbuf, false, preview_cfg(), function()
-				self.vwin = nil
-				if self.vbuf then
-					vim.api.nvim_buf_delete(self.vbuf, { force = true })
-					self.vbuf = nil
-				end
-				self:_close_soon()
-			end)
-			vim.wo[self.vwin].wrap = true
-			vim.wo[self.vwin].winhighlight = _WINHL
-		else
-			vim.api.nvim_win_set_config(self.vwin, preview_cfg())
-		end
-		self:update_preview()
-	end
+	if self.preview_enabled then self:update_preview() end
 
 	self._in_relayout = false
 end
