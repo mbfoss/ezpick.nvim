@@ -15,14 +15,6 @@ local M = {}
 ---@field slot     string?    -- short word for what the value stands for, shown as "--name <slot>"
 ---@field desc     string?    -- shown in the completion menu, beside the form the flag takes
 
----@alias ezpick.queryflags.HintKind
----| "unknown-flag"     -- a dashed word that names no flag
----| "duplicate-flag"   -- a value flag given more than once
----| "missing-value"    -- a value flag with nothing to take
----| "bad-value"        -- a value outside a strict flag's `values`
----| "unexpected-value" -- a value glued onto a switch
----| "late-separator"   -- a bare "--" written once the query has started
-
 ---A mistake in the line. `parse` still returns a best-effort query beside its
 ---hints, but a hinted line has no single reading and the picker does not search
 ---it. `parse` reports the half-written states a correct flag passes through too;
@@ -31,7 +23,6 @@ local M = {}
 ---@field start   integer  -- 0-indexed byte start of the offending span
 ---@field finish  integer  -- 0-indexed byte end of the offending span (exclusive)
 ---@field msg     string   -- terse; it shares the prompt line with the query
----@field kind    ezpick.queryflags.HintKind
 ---@field settled boolean? -- typing on cannot resolve this one, so show it even
 ---                        -- while the cursor is still inside the span
 
@@ -206,19 +197,26 @@ local function _spanned_parts(piece)
     return out
 end
 
----Mark every bare "--" written from `from` on. Only flags stand in front of the
----separator, and the query has already started here, so the word that started it
----is where the mistake is: the "--" itself is beyond saving, and says so.
+---Mark the word that ended the flags when a bare "--" is written after it. Only
+---flags stand in front of the separator, so the word that named none of them is
+---where the mistake is, not the "--" it stranded: the mark points at what has to
+---change, and one mark does for however many "--" follow.
 ---@param str  string
 ---@param from integer -- 1-indexed start of the query
----@param hint fun(kind:ezpick.queryflags.HintKind, s:integer, e:integer, msg:string, settled:boolean?)
+---@param hint fun(s:integer, e:integer, msg:string, settled:boolean?)
 local function _hint_late_separators(str, from, hint)
-    local i = from
+    -- The query starts on a non-space, and never on a bare "--": `_scan` takes
+    -- that as the separator itself.
+    local word_s, word_e = str:find("%S+", from)
+    if not word_s then return end
+
+    local i = word_e + 1
     while i <= #str do
         local s, e = str:find("%S+", i)
         if not s then break end
         if str:sub(s, e) == _PREFIX then
-            hint("late-separator", s, e, ("invalid flag before %s"):format(_PREFIX), true)
+            hint(word_s, word_e, ("invalid flag before %s"):format(_PREFIX), true)
+            return
         end
         i = e + 1
     end
@@ -236,13 +234,12 @@ local function _scan(str, defs)
     ---@type ezpick.queryflags.FlagDef?
     local pending = nil -- a value flag left waiting for its value at end of input
 
-    ---@param kind    ezpick.queryflags.HintKind
     ---@param s       integer  -- 1-indexed inclusive
     ---@param e       integer  -- 1-indexed inclusive
     ---@param msg     string
     ---@param settled boolean? -- see `Hint.settled`
-    local function hint(kind, s, e, msg, settled)
-        hints[#hints + 1] = { kind = kind, start = s - 1, finish = e, msg = msg, settled = settled or nil }
+    local function hint(s, e, msg, settled)
+        hints[#hints + 1] = { start = s - 1, finish = e, msg = msg, settled = settled or nil }
     end
 
     ---Echoes the spelling on the line, not the canonical name: the mark and the
@@ -278,7 +275,7 @@ local function _scan(str, defs)
             -- typo or a prefix still being typed is the cursor's to answer.
             if name then
                 assert(name_end)
-                hint("unknown-flag", tok_start, name_end, ("unknown option %s%s"):format(_PREFIX, name))
+                hint(tok_start, name_end, ("unknown option %s%s"):format(_PREFIX, name))
             end
             _hint_late_separators(str, tok_start, hint)
             return pieces, tok_start, hints, nil
@@ -305,8 +302,8 @@ local function _scan(str, defs)
             if def.type == "boolean" then
                 -- A switch is written by being there: "--fixed=false" and
                 -- "--fixed=true" are the same mistake, and neither is acted on.
-                hint("unexpected-value", tok_start, value.finish,
-                    ("%s%s takes no value"):format(_PREFIX, name))
+                hint(tok_start, value.finish,
+                    ("%s%s takes no value"):format(_PREFIX, name), true)
             else
                 pieces[#pieces + 1] = value
             end
@@ -320,11 +317,11 @@ local function _scan(str, defs)
                 -- something separates it from the name: "--mode" with the cursor
                 -- on it is a name still being typed, perhaps into "--modes".
                 if i <= len then pending = def end
-                hint("missing-value", tok_start, name_end, needs_value(def, name))
+                hint(tok_start, name_end, needs_value(def, name))
             elseif next_sep or (next_name and defs[_key(next_name)]) then
                 -- Something already stands where the value would go, so typing
                 -- on can never fill the slot: settled, and said at once.
-                hint("missing-value", tok_start, name_end, needs_value(def, name), true)
+                hint(tok_start, name_end, needs_value(def, name), true)
             else
                 local value
                 value, i = _read_value(str, j)
@@ -380,7 +377,6 @@ function M.parse(schema, raw)
                         -- the mark falls back to the flag that went without one.
                         local spanned = span.finish >= span.start
                         hints[#hints + 1] = {
-                            kind   = "bad-value",
                             start  = (spanned and span.start or flag.start) - 1,
                             finish = spanned and span.finish or flag.finish,
                             msg    = ("%s%s: %s"):format(_PREFIX, piece.typed, table.concat(values, "|")),
@@ -405,19 +401,18 @@ function M.parse(schema, raw)
 
     -- Every occurrence is marked, so the repetition is visible as a whole, and
     -- all of them carry the message.
-    for name, spans in pairs(occurrences) do
+    for _, spans in pairs(occurrences) do
         if #spans > 1 then
-            -- The winner is quoted as it would be written, commas and all.
-            local shown = flags[name]
-            if type(shown) == "table" then shown = table.concat(shown, ",") end
             for _, span in ipairs(spans) do
                 hints[#hints + 1] = {
-                    kind   = "duplicate-flag",
-                    start  = span.start,
-                    finish = span.finish,
+                    start   = span.start,
+                    finish  = span.finish,
+                    -- A repetition already written: the flag ahead of it is not
+                    -- going to be unwritten by typing on.
+                    settled = true,
                     -- Each mark speaks for the spelling it sits on: two aliases
                     -- of one flag are one repetition, told twice in two names.
-                    msg    = ("%s%s set %d times, using '%s'"):format(_PREFIX, span.typed, #spans, shown),
+                    msg     = ("%s%s set %d times"):format(_PREFIX, span.typed, #spans),
                 }
             end
         end

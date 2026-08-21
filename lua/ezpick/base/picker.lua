@@ -108,25 +108,6 @@ local _RULE              = "─"
 ---@type string
 local _HINT_ICON = "󰀪 "
 
----Hints that describe an incomplete thing rather than a wrong one. Every flag
----passes through these states on the way to being written correctly, so their
----message is held back until the cursor has moved off what they point at. The
----rest --- a flag given twice, a value on a switch --- are already settled
----mistakes and say so immediately, as does any hint `parse` itself marks
----`settled`: a kind that is usually mid-typing can still turn up in a state
----typing cannot get out of. Holding a message back only delays the words: a
----hint stops the search either way (see `run_fetch`).
----
----`parse` reports everything it can see and holds nothing back, having no cursor
----to hold it against; this table and `_at_cursor` are the whole of that judgment.
----@type table<ezpick.queryflags.HintKind, boolean>
-local _HELD_WHILE_TYPING = {
-	["late-separator"] = true,
-	["missing-value"]  = true,
-	["unknown-flag"]   = true,
-	["bad-value"]      = true,
-}
-
 ---Whether the cursor is still in the span `hint` points at: it counts as inside
 ---while only whitespace separates the end of the span from the cursor, so the
 ---space after "--dir" is part of writing "--dir", not of having finished it.
@@ -869,12 +850,14 @@ function Picker:_render_prompt_marks(query)
 	-- A hint about the span the cursor is still inside is a hint about
 	-- unfinished typing: half of "--dir" is a missing value and half of "--case
 	-- smart" is a bad one, and saying so on the way through helps nobody. Those
-	-- wait for the cursor to leave; a mistake that is already complete does not.
+	-- wait for the cursor to leave; a mistake `parse` marks `settled` cannot be
+	-- typed out of, so it says so at once. Holding a message back only delays
+	-- the words: a hint stops the search either way (see `run_fetch`).
 	local cursor   = self.pwin and vim.api.nvim_win_get_cursor(self.pwin)[2] or #query
 	self._hint_col = cursor
 	local shown    = {}
 	for _, hint in ipairs(queryflags.parse(self.opts.flags, query).hints) do
-		if hint.settled or not (_HELD_WHILE_TYPING[hint.kind] and _at_cursor(query, hint, cursor)) then
+		if hint.settled or not _at_cursor(query, hint, cursor) then
 			table.insert(shown, hint)
 		end
 	end

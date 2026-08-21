@@ -9,23 +9,38 @@ local schema = {
     { name = "fixed",     type = "boolean" },
 }
 
+---A hint is a span and a message; nothing on it names the mistake. These
+---patterns stand for the kinds the tests below talk about, matched on the
+---message. Kept here rather than exported: only the tests sort hints by kind.
+---@type table<string, string>
+local _KIND = {
+    ["unknown-flag"]     = "^unknown option ",
+    ["duplicate-flag"]   = " set %d+ times",
+    ["missing-value"]    = " needs a value$",
+    ["bad-value"]        = "^%-%-%S+: ",
+    ["unexpected-value"] = " takes no value$",
+    ["late-separator"]   = "^invalid flag before ",
+}
+
 ---@param result ezpick.queryflags.ParseResult
----@param kind   string
+---@param kind   string  -- a key of `_KIND`
 ---@return ezpick.queryflags.Hint?
 local function hint_of(result, kind)
+    local pat = assert(_KIND[kind])
     for _, h in ipairs(result.hints) do
-        if h.kind == kind then return h end
+        if h.msg:find(pat) then return h end
     end
     return nil
 end
 
 ---@param result ezpick.queryflags.ParseResult
----@param kind   string
+---@param kind   string  -- a key of `_KIND`
 ---@return ezpick.queryflags.Hint[]  -- in the order parse sorted them, left to right
 local function hints_of(result, kind)
+    local pat = assert(_KIND[kind])
     local found = {}
     for _, h in ipairs(result.hints) do
-        if h.kind == kind then found[#found + 1] = h end
+        if h.msg:find(pat) then found[#found + 1] = h end
     end
     return found
 end
@@ -128,19 +143,17 @@ describe("queryflags literal separator", function()
         assert.are.same({}, r.flags)
     end)
 
-    it("hints a bare -- the query has already started", function()
+    it("hints the word that ended the flags, not the bare -- it stranded", function()
         local r = qf.parse(schema, "a b -- c d")
         local h = assert(hint_of(r, "late-separator"))
-        assert.are.equal(4, h.start)
-        assert.are.equal(6, h.finish)
+        assert.are.same({ start = 0, finish = 1 }, { start = h.start, finish = h.finish })
         assert.is_true(h.settled)
     end)
 
-    it("hints every bare -- written in the query", function()
+    it("says it once, however many bare -- follow", function()
         local hs = hints_of(qf.parse(schema, "a -- b -- c"), "late-separator")
-        assert.are.equal(2, #hs)
-        assert.are.equal(2, hs[1].start)
-        assert.are.equal(7, hs[2].start)
+        assert.are.equal(1, #hs)
+        assert.are.same({ start = 0, finish = 1 }, { start = hs[1].start, finish = hs[1].finish })
     end)
 
     it("does not hint dashes that are not a bare --", function()
@@ -394,14 +407,11 @@ describe("queryflags hints", function()
         local hs = hints_of(r, "duplicate-flag")
         assert.are.equal(2, #hs)
         assert.is_truthy(hs[1].msg:find("2 times", 1, true))
-        assert.is_truthy(hs[1].msg:find("'b'", 1, true))
     end)
 
     it("marks every occurrence of a repeated flag", function()
         local hs = hints_of(qf.parse(schema, "--path a --path b --path c"), "duplicate-flag")
         assert.are.equal(3, #hs)
-        -- the winner named is the last one, not the second
-        assert.is_truthy(hs[1].msg:find("'c'", 1, true))
         assert.is_truthy(hs[1].msg:find("3 times", 1, true))
     end)
 
@@ -427,8 +437,6 @@ describe("queryflags hints", function()
         assert.are.same({ "y", "z" }, r.flags.kind)
         local hs = hints_of(r, "duplicate-flag")
         assert.are.equal(2, #hs)
-        -- the winner is quoted as it was written, commas and all
-        assert.is_truthy(hs[1].msg:find("'y,z'", 1, true))
     end)
 
     it("says nothing about a repeated switch, which discards nothing", function()
