@@ -60,16 +60,16 @@ tests/                   plenary busted specs
   token (`--type lua,rust`) and comes back as a `string[]`; every flag is
   written at most once, and a repetition is hinted with the last one winning. A
   standalone `--` ends the flagged section for a query that must start with a
-  flag name; one written after the query has started is hinted `late-separator`,
-  the single hint the picker refuses to search on (`_BLOCKING` in `picker.lua`)
-  since the query would read as split around it. `parse` never fails on what was
-  typed: anything doubtful comes back
-  as an advisory `ParseResult.hints` entry beside a usable query, which the
-  picker underlines in the prompt rather than acting on. (A malformed *schema*
-  does fail, at once — `strict` without `values` asserts.) Every problem is
-  reported, including the half-written states a correct flag passes through:
-  telling those apart takes the cursor, so the picker is where a hint is held
-  back until the cursor leaves what it points at.
+  flag name; one written after the query has started is hinted `late-separator`.
+  `parse` never fails on what was typed: anything doubtful comes back as a
+  `ParseResult.hints` entry beside a best-effort query, which the picker
+  underlines in the prompt. A hinted line has no single reading, so the picker
+  refuses to search it at all — the fetch is cancelled and the list cleared
+  until the hints are gone. (A malformed *schema* does fail, at once —
+  `strict` without `values` asserts.) Every problem is reported, including the
+  half-written states a correct flag passes through: telling those apart takes
+  the cursor, so the picker is where a hint's *message* is held back until the
+  cursor leaves what it points at — the search stops either way.
 - **`layouts.lua`** — geometry for the list/preview floats. The prompt's height is
   an input: the picker measures what the query wraps to with
   `nvim_win_text_height` and asks for that many rows, which `_split_frame` grants

@@ -161,10 +161,10 @@ describe("picker query hints", function()
             -- carrying the hint's own highlight rather than the first one.
             for _, vline in ipairs(m[4] and m[4].virt_lines or {}) do
                 for _, chunk in ipairs(vline) do
-                    if chunk[2] == "DiagnosticVirtualTextWarn" then hint = vim.trim(chunk[1]) end
+                    if chunk[2] == "DiagnosticVirtualTextError" then hint = vim.trim(chunk[1]) end
                 end
             end
-            if m[4] and m[4].hl_group == "DiagnosticUnderlineWarn" then marked = marked + 1 end
+            if m[4] and m[4].hl_group == "DiagnosticUnderlineError" then marked = marked + 1 end
         end
         -- Any float but the prompt's: the counter is the list window's winbar,
         -- and the list is the only other one this picker opens.
@@ -218,18 +218,23 @@ describe("picker query hints", function()
         assert.is_truthy(select(3, type_query("--dir", nil, 0)):find("needs a value", 1, true))
     end)
 
-    it("hands the corner back to the position counter when the cursor returns", function()
-        -- The two share one corner and the hint takes it; showing a hint has to
-        -- put the count back on the way out, or it goes missing for good.
-        assert.is_false(select(5, type_query("--case sm", nil, 0)))
-        local hint, _, counted = select(3, type_query("--case sm", nil, { 0, 9 }))
+    it("gives the shared corner to the hint, and to the counter on a clean line", function()
+        -- The hint and the position counter share one corner. A hint takes it,
+        -- and there is nothing to count anyway: the search does not run.
+        local hint, _, counted = select(3, type_query("--case sm", nil, 0))
+        assert.is_truthy(hint)
+        assert.is_false(counted)
+        -- Nothing to say about a line that parses, so the count has the corner.
+        hint, _, counted = select(3, type_query("--case smart x"))
         assert.is_nil(hint)
         assert.is_true(counted)
     end)
 
-    it("searches for a typo'd flag and flags it as unknown", function()
+    it("refuses to search a typo'd flag, and flags it as unknown", function()
+        -- The finder is never asked, leaving the empty query the picker opened
+        -- on as the last one that ran.
         local query, _, hint = type_query("--hiddn x")
-        assert.are.equal("--hiddn x", query)
+        assert.are.equal("", query)
         assert.is_truthy(hint:find("unknown option --hiddn", 1, true))
     end)
 
@@ -243,9 +248,9 @@ describe("picker query hints", function()
         assert.are.equal(0, marked)
     end)
 
-    it("marks a flag whose value another occurrence threw away", function()
-        local _, flags, hint, marked = type_query("--dir a --dir b x")
-        assert.are.equal("b", flags.dir)
+    it("marks every occurrence of a flag written twice", function()
+        local query, _, hint, marked = type_query("--dir a --dir b x")
+        assert.are.equal("", query)
         assert.is_truthy(hint:find("2 times", 1, true))
         assert.are.equal(2, marked)
     end)

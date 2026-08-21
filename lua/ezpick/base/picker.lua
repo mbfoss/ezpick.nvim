@@ -103,28 +103,22 @@ local _RULE              = "─"
 ---@field preview_border string|table Border for the preview float.
 
 
----Hints that describe an incomplete thing rather than a wrong one. Every flag
----passes through these states on the way to being written correctly, so they are
----held back until the cursor has moved off what they point at. The rest --- a
----flag given twice, a value on a switch --- are already settled mistakes and say
----so immediately, as does any hint `parse` itself marks `settled`: a kind that
----is usually mid-typing can still turn up in a state typing cannot get out of.
----
----`parse` reports everything it can see and holds nothing back, having no cursor
----to hold it against; this table and `_at_cursor` are the whole of that judgment.
 ---Marks the line under the query as a remark about the query rather than more of
 ---it. The trailing space is part of it: the two run together otherwise.
 ---@type string
 local _HINT_ICON = "󰀪 "
 
----Hints the search will not run against: the query they mark has no single
----reading, so a best-effort one would search for something other than what is
----written. Every other mistake is pointed out and searched around.
----@type table<ezpick.queryflags.HintKind, boolean>
-local _BLOCKING = {
-	["late-separator"] = true,
-}
-
+---Hints that describe an incomplete thing rather than a wrong one. Every flag
+---passes through these states on the way to being written correctly, so their
+---message is held back until the cursor has moved off what they point at. The
+---rest --- a flag given twice, a value on a switch --- are already settled
+---mistakes and say so immediately, as does any hint `parse` itself marks
+---`settled`: a kind that is usually mid-typing can still turn up in a state
+---typing cannot get out of. Holding a message back only delays the words: a
+---hint stops the search either way (see `run_fetch`).
+---
+---`parse` reports everything it can see and holds nothing back, having no cursor
+---to hold it against; this table and `_at_cursor` are the whole of that judgment.
 ---@type table<ezpick.queryflags.HintKind, boolean>
 local _HELD_WHILE_TYPING = {
 	["late-separator"] = true,
@@ -889,14 +883,14 @@ function Picker:_render_prompt_marks(query)
 	for _, hint in ipairs(shown) do
 		vim.api.nvim_buf_set_extmark(self.pbuf, _NS_CONTENT, 0, math.min(hint.start, line), {
 			end_col  = math.min(hint.finish, line),
-			hl_group = "DiagnosticUnderlineWarn",
+			hl_group = "DiagnosticUnderlineError",
 			priority = 200,
 		})
 	end
 
 	-- Only the first gets words; the prompt line is not a diagnostics window.
 	self._query_hint = shown[1].msg
-	self:_set_prompt_hint(_NS_CONTENT, shown[1].msg, "DiagnosticVirtualTextWarn", 100)
+	self:_set_prompt_hint(_NS_CONTENT, shown[1].msg, "DiagnosticVirtualTextError", 100)
 end
 
 ---The list's winbar: the rule below the prompt, with the spinner while a fetch
@@ -1338,20 +1332,16 @@ function Picker:run_fetch()
 
 	local clean_query, flags
 	if #self.opts.flags > 0 then
-		-- `parse` never refuses: a half-typed escape or an unknown flag yields a
-		-- hint beside a best-effort query, so the list keeps up with the typing
-		-- instead of emptying at the first character of a mistake. The one
-		-- exception is a hint in `_BLOCKING`, which leaves nothing to search for.
+		-- A hint means the line has no single reading, so searching it would
+		-- search for something other than what is written: no hints, no fetch.
 		local parsed      = queryflags.parse(self.opts.flags, query_text)
 		clean_query       = parsed.query
 		flags             = parsed.flags
 		fetch_opts.parsed = parsed
 
-		for _, hint in ipairs(parsed.hints) do
-			if _BLOCKING[hint.kind] then
-				cancel()
-				return
-			end
+		if #parsed.hints > 0 then
+			cancel()
+			return
 		end
 	else
 		clean_query = query_text

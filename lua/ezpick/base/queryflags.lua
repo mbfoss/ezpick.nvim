@@ -23,9 +23,10 @@ local M = {}
 ---| "unexpected-value" -- a value glued onto a switch
 ---| "late-separator"   -- a bare "--" written once the query has started
 
----Advisory only: `parse` always returns a usable query beside its hints, and
----reports the half-written states a correct flag passes through too. Telling
----those apart takes the cursor, which the consumer holds -- see `settled`.
+---A mistake in the line. `parse` still returns a best-effort query beside its
+---hints, but a hinted line has no single reading and the picker does not search
+---it. `parse` reports the half-written states a correct flag passes through too;
+---telling those apart takes the cursor, which the consumer holds -- see `settled`.
 ---@class ezpick.queryflags.Hint
 ---@field start   integer  -- 0-indexed byte start of the offending span
 ---@field finish  integer  -- 0-indexed byte end of the offending span (exclusive)

@@ -170,14 +170,14 @@ than guess which reading was meant.
 A standalone `--` ends the flagged section, for the one case that needs it: a
 query starting with a flag name. Only flags go in front of it: a `--`
 written once the query has started cannot end a section that already ended, so
-the picker underlines it, reports the word before it as an invalid flag, and
-searches for nothing until the line is one reading or the other.
+the picker underlines it and reports the word before it as an invalid flag.
 
-Other mistakes are pointed out, never enforced. A typo'd flag, a forgotten value, a
-value outside a flag's set or a flag written after the query gets an underline
-and a short hint under the prompt, while the search keeps running on a
-best-effort reading. A hint about the flag the cursor is still inside waits
-until the cursor moves on, so writing one out correctly is silent.
+Every mistake reads the same way. A typo'd flag, a forgotten value, a value
+outside a flag's set or a flag written after the query gets an underline and a
+short hint under the prompt, and the search stops until the line is one reading
+or the other — a query with a mistake in it would search for something other
+than what is written. The words of a hint about the flag the cursor is still
+inside wait until the cursor moves on, so writing one out correctly is silent.
 
 A query too long for one line wraps rather than scrolling out of sight, and the
 prompt grows a row at a time to hold it — taking the rows from the list, up to an
