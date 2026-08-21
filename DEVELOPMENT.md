@@ -154,6 +154,30 @@ on first use and forwards to it; when keystone.nvim is not installed,
 ezpick free of hard plugin dependencies without duplicating keystone's icon
 table.
 
+## Help file
+
+[`doc/ezpick.txt`](doc/ezpick.txt) is generated from [`README.md`](README.md)
+with [panvimdoc](https://github.com/kdheepak/panvimdoc), pinned to a commit in
+the script. `doc/tags` is refreshed with `:helptags`.
+
+```bash
+make doc          # rewrite doc/ezpick.txt and doc/tags
+make doc_check    # exit 1 when the help file is out of date
+```
+
+Help tags come from a hidden comment on the line after a section heading, so a
+heading can be renamed without breaking `:help` links:
+
+```markdown
+## Writing your own source
+<!-- tag: ezpick-custom-sources -->
+```
+
+The comment is stripped before panvimdoc runs and never renders on GitHub. A
+heading without one keeps the tag panvimdoc derives from its text
+(`ezpick-<heading, lowercased, spaces to dashes>`). Tags are limited to
+`[A-Za-z0-9_-]`; anything else fails the build.
+
 ## Coding style
 
 - Add Lua annotations (`---@param`, `---@return`, `---@class`, …) wherever

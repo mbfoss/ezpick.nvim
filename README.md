@@ -12,6 +12,7 @@ and other plugins can register their own sources.
 > source, `files` included, is pure Lua.
 
 ## Installation
+<!-- tag: ezpick-installation -->
 
 **lazy.nvim**
 
@@ -38,7 +39,8 @@ vim.cmd.packadd("ezpick.nvim")
 require("ezpick").setup()
 ```
 
-## Configuration
+## Configuring the picker
+<!-- tag: ezpick-configuration -->
 
 `setup()` takes an optional table; every field has a default, so `setup()` with
 no arguments is valid.
@@ -61,7 +63,8 @@ require("ezpick").setup({
 })
 ```
 
-## Usage
+## Using the picker
+<!-- tag: ezpick-usage -->
 
 Open a source with `:Pick`, which completes both source names and their flags:
 
@@ -79,7 +82,8 @@ An extra argument seeds the initial query:
 
 `:Pick` with no argument lists the available sources through `vim.ui.select`.
 
-### Built-ins
+### Built-in sources
+<!-- tag: ezpick-built-ins -->
 
 | Source | What it lists |
 | --- | --- |
@@ -127,7 +131,8 @@ line unexecuted, ready to edit.
 `resume` reopens the previous picker with its last query and cursor position,
 without re-running the source's setup step.
 
-### Keys
+### Keys inside a picker
+<!-- tag: ezpick-keys -->
 
 Inside a picker, `g?` shows the full list:
 
@@ -141,7 +146,8 @@ Inside a picker, `g?` shows the full list:
 | `<C-q>` | Send results to the quickfix list |
 | `<C-r><C-w>` | Insert the original `<cword>` |
 
-### Flags
+### Flags in a query
+<!-- tag: ezpick-flags -->
 
 Sources can accept inline flags in the query. **Flags go first**; everything
 from the first non-flag word onward is the query, verbatim — spaces, backslashes
@@ -195,7 +201,8 @@ several of which are OR'd together.
 :Pick live_grep --dir ~/src -- --hidden               " searches for "--hidden"
 ```
 
-## Custom sources
+## Writing your own source
+<!-- tag: ezpick-custom-sources -->
 
 ```lua
 require("ezpick").register("my_source", {
@@ -221,7 +228,8 @@ A name that could never be opened is an error rather than a warning: the empty
 string, a name containing whitespace (`:Pick` splits its arguments on it), and
 `resume` (handled by `:Pick` before the registry is consulted).
 
-## Highlights
+## Highlight groups
+<!-- tag: ezpick-highlights -->
 
 | Group | Links to |
 | --- | --- |

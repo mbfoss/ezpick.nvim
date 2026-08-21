@@ -57,6 +57,41 @@ if [ -z "${PANVIMDOC_DIR:-}" ]; then
     }
 fi
 
+# Help tags come from a hidden comment right after a section heading:
+#
+#   ## Custom sources
+#   <!-- tag: ezpick-sources -->
+#
+# Without one, panvimdoc derives the tag from the heading text. The comment is
+# stripped from the copy panvimdoc reads; the tag it generated is rewritten in
+# the output below.
+mkdir -p "$work"
+awk -v project="$project" '
+    function slug(s) {
+        sub(/^#+[ \t]*/, "", s)
+        s = tolower(s)
+        gsub(/[ \t]+/, "-", s)
+        return project "-" s
+    }
+    /^<!--[ \t]*tag:.*-->[ \t]*$/ {
+        if (heading == "") next
+        tag = $0
+        sub(/^<!--[ \t]*tag:[ \t]*/, "", tag)
+        sub(/[ \t]*-->[ \t]*$/, "", tag)
+        if (tag !~ /^[A-Za-z0-9_-]+$/) {
+            print "gendoc: bad help tag \"" tag "\" on " heading > "/dev/stderr"
+            exit 1
+        }
+        print heading "\t" tag
+        heading = ""
+        next
+    }
+    /^##+[ \t]/ { heading = slug($0); next }
+    /^[ \t]*$/ { next }
+    { heading = "" }
+' "$root/README.md" > "$work/tagmap"
+sed '/^<!--[[:space:]]*tag:.*-->[[:space:]]*$/d' "$root/README.md" > "$work/README.md"
+
 # panvimdoc writes to doc/<project>.txt relative to the working directory, so
 # run it in a scratch tree and compare from there.
 mkdir -p "$work/doc"
@@ -64,7 +99,7 @@ mkdir -p "$work/doc"
     cd "$work"
     sh "$panvimdoc/panvimdoc.sh" \
         --project-name "$project" \
-        --input-file "$root/README.md" \
+        --input-file "$work/README.md" \
         --vim-version "$vimversion" \
         --description "$description" \
         --toc true \
@@ -73,6 +108,36 @@ mkdir -p "$work/doc"
         --demojify true \
         --treesitter true
 ) >/dev/null
+
+# Swap in the tags declared in README.md, keeping the trailing tag right-aligned
+# and the |links| to it in sync.
+if [ -s "$work/tagmap" ]; then
+    awk '
+        NR == FNR {
+            i = index($0, "\t")
+            map[substr($0, 1, i - 1)] = substr($0, i + 1)
+            next
+        }
+        {
+            width = length($0)
+            line = $0
+            for (k in map) {
+                gsub("\\*" k "\\*", "*" map[k] "*", line)
+                gsub("\\|" k "\\|", "|" map[k] "|", line)
+            }
+            if (line != $0 && match(line, /[*|][^ *|]+[*|]$/)) {
+                token = substr(line, RSTART)
+                head = substr(line, 1, RSTART - 1)
+                sub(/[ \t]+$/, "", head)
+                pad = width - length(head) - length(token)
+                if (pad < 1) pad = 1
+                line = head sprintf("%" pad "s", "") token
+            }
+            print line
+        }
+    ' "$work/tagmap" "$work/doc/$project.txt" > "$work/retagged.txt"
+    mv "$work/retagged.txt" "$work/doc/$project.txt"
+fi
 
 if [ "${1:-}" = "--check" ]; then
     if cmp -s "$work/doc/$project.txt" "$out"; then

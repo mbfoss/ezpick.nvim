@@ -4,13 +4,13 @@
 Table of Contents                                   *ezpick-table-of-contents*
 
 1. Installation                                          |ezpick-installation|
-2. Configuration                                        |ezpick-configuration|
-3. Usage                                                        |ezpick-usage|
-  - Built-ins                                               |ezpick-built-ins|
-  - Keys                                                         |ezpick-keys|
-  - Flags                                                       |ezpick-flags|
-4. Custom sources                                      |ezpick-custom-sources|
-5. Highlights                                              |ezpick-highlights|
+2. Configuring the picker                               |ezpick-configuration|
+3. Using the picker                                             |ezpick-usage|
+  - Built-in sources                                        |ezpick-built-ins|
+  - Keys inside a picker                                         |ezpick-keys|
+  - Flags in a query                                            |ezpick-flags|
+4. Writing your own source                             |ezpick-custom-sources|
+5. Highlight groups                                        |ezpick-highlights|
 A fast, dependency-free fuzzy picker for Neovim.
 
 ezpick ships a broad set of built-in sources — files, live grep, buffers, LSP
@@ -53,7 +53,7 @@ Then in your config:
 
 
 ==============================================================================
-2. Configuration                                        *ezpick-configuration*
+2. Configuring the picker                               *ezpick-configuration*
 
 `setup()` takes an optional table; every field has a default, so `setup()` with
 no arguments is valid.
@@ -78,7 +78,7 @@ no arguments is valid.
 
 
 ==============================================================================
-3. Usage                                                        *ezpick-usage*
+3. Using the picker                                             *ezpick-usage*
 
 Open a source with `:Pick`, which completes both source names and their flags:
 
@@ -97,7 +97,7 @@ An extra argument seeds the initial query:
 `:Pick` with no argument lists the available sources through `vim.ui.select`.
 
 
-BUILT-INS                                                   *ezpick-built-ins*
+BUILT-IN SOURCES                                            *ezpick-built-ins*
 
   -----------------------------------------------------------------------
   Source                              What it lists
@@ -188,7 +188,7 @@ line unexecuted, ready to edit.
 without re-running the source’s setup step.
 
 
-KEYS                                                             *ezpick-keys*
+KEYS INSIDE A PICKER                                             *ezpick-keys*
 
 Inside a picker, `g?` shows the full list:
 
@@ -202,7 +202,7 @@ Inside a picker, `g?` shows the full list:
   <C-q>           Send results to the quickfix list
   <C-r><C-w>      Insert the original <cword>
 
-FLAGS                                                           *ezpick-flags*
+FLAGS IN A QUERY                                                *ezpick-flags*
 
 Sources can accept inline flags in the query. **Flags go first**; everything
 from the first non-flag word onward is the query, verbatim — spaces,
@@ -258,7 +258,7 @@ together.
 
 
 ==============================================================================
-4. Custom sources                                      *ezpick-custom-sources*
+4. Writing your own source                             *ezpick-custom-sources*
 
 >lua
     require("ezpick").register("my_source", {
@@ -286,7 +286,7 @@ string, a name containing whitespace (`:Pick` splits its arguments on it), and
 
 
 ==============================================================================
-5. Highlights                                              *ezpick-highlights*
+5. Highlight groups                                        *ezpick-highlights*
 
   Group                   Links to
   ----------------------- ------------
