@@ -372,7 +372,6 @@ end
 ---@field _spinner_frame string? -- spinner frame currently drawn on the prompt line, nil when idle
 ---@field _prompt_wrapped integer -- screen lines the prompt took when the picker was last laid out
 ---@field _vline_row integer? -- list row whose virtual line currently carries the cursor-line highlight
----@field _in_relayout boolean? -- set while `relayout` runs, to keep the renderers it calls from calling it back
 local Picker = {}
 Picker.__index = Picker
 
@@ -568,16 +567,16 @@ end
 ---@return nil
 function Picker:_sync_prompt_height()
 	if self.closed or not self.layout then return end
-	-- `relayout` renders the list again on its way through, and rendering is what
-	-- calls this: the measurement it would take is of a prompt half moved.
-	if self._in_relayout then return end
 	-- `relayout` dismisses the completion menu to move the floats out from under
 	-- it. Growing the prompt is not worth that mid-completion; `CompleteDone`
 	-- runs `apply_prompt` and the resize lands then.
 	if vim.fn.pumvisible() == 1 then return end
-	if self:_prompt_text_height() ~= self._prompt_wrapped then
-		self:relayout()
-	end
+	if self:_prompt_text_height() == self._prompt_wrapped then return end
+	-- `_apply_layout`, not `relayout`: a taller prompt takes rows off the list
+	-- without changing any width, so nothing the list holds has to be drawn
+	-- again -- and skipping the render is also what keeps this off a path that
+	-- would come back around to here.
+	self:_apply_layout()
 end
 
 ---Take the picker down on the next tick, unless it is already going.
@@ -764,12 +763,11 @@ function Picker:_resize_windows(cfgs)
 	return list_moved
 end
 
----Move the floats to the current editor size. The windows themselves are put up
----once by `_create_windows`, at launch.
-function Picker:relayout()
-	if self.closed then return end
-	self._in_relayout = true
-
+---Settle the layout for the current editor size and move the floats onto it.
+---Renders nothing, so no renderer can call back into it: the one loop the
+---measurement could close is cut here rather than guarded against.
+---@return boolean list_moved Whether the list window changed geometry.
+function Picker:_apply_layout()
 	if vim.fn.pumvisible() == 1 then
 		vim.api.nvim_feedkeys(
 			vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false
@@ -784,7 +782,8 @@ function Picker:relayout()
 
 	-- The prompt is where it will be and as wide as it will be, so what the query
 	-- wraps to can be measured. Only its height is still open, and only the rows
-	-- under it -- the list's -- answer to it; the widths and the preview do not.
+	-- under it -- the list's -- answer to it; the widths and the preview do not,
+	-- so this second pass is the last one.
 	local wrapped = self:_prompt_text_height()
 	if wrapped ~= self.layout.prompt_height then
 		self.layout = self:_build_layout(wrapped)
@@ -795,6 +794,17 @@ function Picker:relayout()
 	-- measurement is what keeps a query that goes on growing from asking for a
 	-- relayout on every keystroke.
 	self._prompt_wrapped = wrapped
+
+	return list_moved
+end
+
+---Move the floats to the current editor size and draw what the new size changed.
+---The windows themselves are put up once by `_create_windows`, at launch.
+---@return nil
+function Picker:relayout()
+	if self.closed then return end
+
+	local list_moved = self:_apply_layout()
 
 	-- The separators are drawn to the list width, so a list that survives a
 	-- relayout has to be laid out again against the new one -- otherwise every
@@ -808,8 +818,6 @@ function Picker:relayout()
 	end
 
 	if self.preview_enabled then self:update_preview() end
-
-	self._in_relayout = false
 end
 
 ---Show `msg` under the query, along the prompt's right edge.
