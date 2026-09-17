@@ -73,6 +73,17 @@ require("ezpick").setup({
 `command_alias` defines a second user command running the same handler and
 completion as `:Ezpick`, for a shorter name.
 
+## Health <!-- tag: health -->
+
+```vim
+:checkhealth ezpick
+```
+
+Reports the commands in place (`:Ezpick`, and the `command_alias` when you set
+one) and the options that differ from the defaults. An option name ezpick does
+not define is reported as a warning: `setup()` merges the table you pass
+wholesale, so a misspelled one would otherwise be accepted in silence.
+
 ## Using the picker <!-- tag: usage -->
 
 Open a source with `:Ezpick`, which completes both source names and their flags:
