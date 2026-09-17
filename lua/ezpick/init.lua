@@ -61,8 +61,28 @@ local function _get_default_config()
     }
 end
 
+---The live options, at the defaults until `setup()` applies the user's. Always
+---this same table: `setup()` refills it in place, so a module may capture it
+---once at its top (`local config = require("ezpick").config`) and never see a
+---stale value.
 ---@type ezpick.Config
 M.config = _get_default_config()
+
+---Overwrite `dst` from `src` key by key: a key `src` lacks is dropped, and a
+---table on both sides recurses instead of being swapped in. Nothing reachable
+---from `M.config` is ever replaced, and nothing stale is left behind.
+local function _refill(dst, src)
+    for k in pairs(dst) do
+        if src[k] == nil then dst[k] = nil end
+    end
+    for k, v in pairs(src) do
+        if type(v) == "table" and type(dst[k]) == "table" then
+            _refill(dst[k], v)
+        else
+            dst[k] = v
+        end
+    end
+end
 
 ---Sizing for one source: the configured geometry for the preview state it opens
 ---in, with whatever the source states itself folded over it.
@@ -231,7 +251,9 @@ local _alias_command = nil
 ---`plugin/ezpick.lua`, so this is only needed to change the defaults.
 ---@param opts ezpick.Config?
 function M.setup(opts)
-    M.config = vim.tbl_deep_extend("force", _get_default_config(), opts or {})
+    -- Merged over a fresh copy of the defaults, so no key of an earlier call
+    -- survives into a later one.
+    _refill(M.config, vim.tbl_deep_extend("force", _get_default_config(), opts or {}))
 
     local alias = M.config.command_alias
     if _alias_command and _alias_command ~= alias then
