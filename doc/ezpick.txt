@@ -5,13 +5,14 @@ Table of Contents                                   *ezpick-table-of-contents*
 
 1. Installation                                          |ezpick-installation|
 2. Configuring the picker                               |ezpick-configuration|
-3. Using the picker                                             |ezpick-usage|
+3. Health                                                      |ezpick-health|
+4. Using the picker                                             |ezpick-usage|
   - vim.ui.select                                           |ezpick-ui-select|
   - Built-in sources                                        |ezpick-built-ins|
   - Keys inside a picker                                         |ezpick-keys|
   - Flags                                                       |ezpick-flags|
-4. Writing your own source                             |ezpick-custom-sources|
-5. Highlight groups                                        |ezpick-highlights|
+5. Writing your own source                             |ezpick-custom-sources|
+6. Highlight groups                                        |ezpick-highlights|
 A dependency-free fuzzy picker for Neovim.
 
 ezpick provides built-in sources (files, live grep, buffers, LSP symbols and
@@ -73,7 +74,20 @@ completion as `:Ezpick`, for a shorter name.
 
 
 ==============================================================================
-3. Using the picker                                             *ezpick-usage*
+3. Health                                                      *ezpick-health*
+
+>vim
+    :checkhealth ezpick
+<
+
+Reports the commands in place (`:Ezpick`, and the `command_alias` when you set
+one) and the options that differ from the defaults. An option name ezpick does
+not define is reported as a warning: `setup()` merges the table you pass
+wholesale, so a misspelled one would otherwise be accepted in silence.
+
+
+==============================================================================
+4. Using the picker                                             *ezpick-usage*
 
 Open a source with `:Ezpick`, which completes both source names and their
 flags:
@@ -269,7 +283,7 @@ an even split with it.
 
 
 ==============================================================================
-4. Writing your own source                             *ezpick-custom-sources*
+5. Writing your own source                             *ezpick-custom-sources*
 
 >lua
     require("ezpick").register("my_source", {
@@ -297,7 +311,7 @@ and `resume` (handled by `:Ezpick` before the registry is consulted).
 
 
 ==============================================================================
-5. Highlight groups                                        *ezpick-highlights*
+6. Highlight groups                                        *ezpick-highlights*
 
   Group                   Links to
   ----------------------- -------------------------------------------
