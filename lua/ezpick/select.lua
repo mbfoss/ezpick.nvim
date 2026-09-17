@@ -3,6 +3,7 @@ local M           = {}
 local picker      = require("ezpick.base.picker")
 local pickertools = require("ezpick.base.pickertools")
 local layouts     = require("ezpick.base.layouts")
+local config      = require("ezpick.config").current
 
 ---@return number,number
 local function _compute_dimentions(items)
@@ -42,7 +43,6 @@ return function(items, opts, on_choice)
         }
     end
 
-    local config   = require("ezpick").config
     local geometry = (preview_item and config.with_preview or config.without_preview) or {}
 
     -- A select with nothing to preview shrinks to its own contents rather than

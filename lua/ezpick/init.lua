@@ -1,5 +1,7 @@
 local M = {}
 
+local cfgmod = require("ezpick.config")
+
 -- ---------------------------------------------------------------------------
 -- ezpick
 --
@@ -13,15 +15,6 @@ local M = {}
 -- Built-in sources live in `ezpick.pickers` and are wired up lazily by
 -- `ezpick.registry`. Other plugins add their own with `M.register(name, spec)`.
 -- ---------------------------------------------------------------------------
-
----A picker is sized by which of these two applies, so a source with nothing to
----preview can be narrower than one showing a file beside the list. `layout` only
----arranges a list against a preview, so it is meaningful in `with_preview`.
----@class ezpick.Config
----@field with_preview ezpick.Picker.Geometry? Sizing while the preview is showing.
----@field without_preview ezpick.Picker.Geometry? Sizing while it is not.
----@field auto_complete_flags boolean? Auto-open flag completion on an empty flags line and while typing (default true).
----@field command_alias string? Name of an extra user command running the same handler and completion as `:Ezpick` (for example "Pick").
 
 ---@class ezpick.PickerSpec
 ---@field prompt string
@@ -45,44 +38,10 @@ local M = {}
 ---@field query string?
 ---@field flags string?
 
-local function _get_default_config()
-    ---@type ezpick.Config
-    return {
-        with_preview        = {
-            layout       = "horizontal",
-            width_ratio  = 0.8,
-            height_ratio = 0.7,
-        },
-        without_preview     = {
-            width_ratio  = 0.6,
-            height_ratio = 0.7,
-        },
-        auto_complete_flags = true,
-    }
-end
-
----The live options, at the defaults until `setup()` applies the user's. Always
----this same table: `setup()` refills it in place, so a module may capture it
----once at its top (`local config = require("ezpick").config`) and never see a
----stale value.
+---The live options, held by `ezpick.config`; the same table, so reading an
+---option off `require("ezpick").config` stays supported.
 ---@type ezpick.Config
-M.config = _get_default_config()
-
----Overwrite `dst` from `src` key by key: a key `src` lacks is dropped, and a
----table on both sides recurses instead of being swapped in. Nothing reachable
----from `M.config` is ever replaced, and nothing stale is left behind.
-local function _refill(dst, src)
-    for k in pairs(dst) do
-        if src[k] == nil then dst[k] = nil end
-    end
-    for k, v in pairs(src) do
-        if type(v) == "table" and type(dst[k]) == "table" then
-            _refill(dst[k], v)
-        else
-            dst[k] = v
-        end
-    end
-end
+M.config = cfgmod.current
 
 ---Sizing for one source: the configured geometry for the preview state it opens
 ---in, with whatever the source states itself folded over it.
@@ -251,9 +210,7 @@ local _alias_command = nil
 ---`plugin/ezpick.lua`, so this is only needed to change the defaults.
 ---@param opts ezpick.Config?
 function M.setup(opts)
-    -- Merged over a fresh copy of the defaults, so no key of an earlier call
-    -- survives into a later one.
-    _refill(M.config, vim.tbl_deep_extend("force", _get_default_config(), opts or {}))
+    cfgmod.apply(opts)
 
     local alias = M.config.command_alias
     if _alias_command and _alias_command ~= alias then
