@@ -5,21 +5,36 @@ local pickertools = require("ezpick.base.pickertools")
 ---A snippet to preview against when the current buffer has nothing worth
 ---showing (an empty or unnamed scratch buffer), so a scheme can still be judged
 ---on comments, keywords, strings and numbers.
-local _SAMPLE     = {
-    "-- ezpick colorscheme preview",
-    'local M = { name = "ezpick", version = 1.0 }',
-    "",
-    "---@param count integer",
-    "---@return string",
-    "function M.describe(count)",
-    "    if count > 0 and not M.hidden then",
-    "        return string.format('%d item%s', count, count == 1 and '' or 's')",
-    "    end",
-    "    return 'nothing here' -- nothing matched",
-    "end",
-    "",
-    "return M",
+local _SAMPLE = [[
+---@diagnostic disable
+---@class ClassName
+---@field field_name string
+local data = {
+    key_one = "string_value",
+    key_two = 42,
+    flag = true,
 }
+
+---@param parameter_name string|integer
+---@return boolean
+function function_name(parameter_name)
+    -- TODO: inline comment
+    if type(parameter_name) == "integer" and data.flag ~= nil then
+        for index = 1, 2 do
+            if index == parameter_name then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+return {
+    data = data,
+    function_name = function_name,
+}
+]]
 
 ---Switch to `name`, then restore ezpick's own highlight groups: `:colorscheme`
 ---runs `:highlight clear`, which drops every group defined outside the scheme.
