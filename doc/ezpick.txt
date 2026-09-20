@@ -15,10 +15,10 @@ Table of Contents                                   *ezpick-table-of-contents*
 6. Highlight groups                                        |ezpick-highlights|
 A dependency-free fuzzy picker for Neovim.
 
-ezpick provides built-in sources (files, live grep, buffers, LSP symbols and
-references, diagnostics, quickfix, keymaps, commands and more) behind a single
-`:Ezpick` command. It can replace `vim.ui.select`, and other plugins can
-register their own sources.
+Built-in sources (files, live grep, buffers, LSP symbols and references,
+diagnostics, quickfix, keymaps, commands and more) behind a single `:Ezpick`
+command. It can replace `vim.ui.select`, and other plugins can register their
+own sources.
 
 
   **Requires Neovim ≥ 0.11.** No plugin dependencies. `live_grep` requires
@@ -28,15 +28,15 @@ register their own sources.
 ==============================================================================
 1. Installation                                          *ezpick-installation*
 
-**vim.pack**: the built-in package manager (Neovim >= 0.12, `:help vim.pack`)
+**vim.pack** — the built-in package manager (Neovim >= 0.12, `:help
+vim.pack`):
 
 >lua
     vim.pack.add({ "https://github.com/mbfoss/ezpick.nvim" })
 <
 
-`vim.pack.update()` updates it; `vim.pack.del({ "ezpick.nvim" })` removes it.
-
-On Neovim 0.11, use a plugin manager.
+- `vim.pack.update()` updates it, `vim.pack.del({ "ezpick.nvim" })` removes it.
+- On Neovim 0.11, use a plugin manager.
 
 **lazy.nvim**
 
@@ -48,8 +48,8 @@ On Neovim 0.11, use a plugin manager.
 ==============================================================================
 2. Configuring the picker                               *ezpick-configuration*
 
-`:Ezpick` and the highlight groups are registered by the plugin itself, so no
-`setup()` call is needed. Call it only to change a default:
+`:Ezpick` and the highlight groups are registered by the plugin itself, so
+`setup()` is only needed to change a default:
 
 >lua
     require("ezpick").setup({
@@ -70,12 +70,6 @@ On Neovim 0.11, use a plugin manager.
     })
 <
 
-`command_alias` defines a second user command running the same handler and
-completion as `:Ezpick`, for a shorter name.
-
-`rg_path` points `live_grep` at a particular ripgrep, for a build that is not
-on the `PATH`.
-
 
 ==============================================================================
 3. Health                                                      *ezpick-health*
@@ -84,17 +78,18 @@ on the `PATH`.
     :checkhealth ezpick
 <
 
-Reports the commands in place (`:Ezpick`, and the `command_alias` when you set
-one) and the options that differ from the defaults. An option name ezpick does
-not define is reported as a warning: `setup()` merges the table you pass
-wholesale, so a misspelled one would otherwise be accepted in silence.
+Reports:
+
+- the commands in place (`:Ezpick`, and `command_alias` when set);
+- the options that differ from the defaults;
+- as a warning, any option name ezpick does not define — `setup()` merges the
+    table wholesale, so a misspelled one would otherwise be accepted in silence.
 
 
 ==============================================================================
 4. Using the picker                                             *ezpick-usage*
 
-Open a source with `:Ezpick`, which completes both source names and their
-flags:
+`:Ezpick` opens a source and completes both source names and their flags:
 
 >vim
     :Ezpick files
@@ -108,13 +103,14 @@ An extra argument seeds the initial query:
     :Ezpick live_grep TODO
 <
 
-`:Ezpick` with no argument lists the available sources through `vim.ui.select`.
+With no argument, `:Ezpick` lists the available sources through
+`vim.ui.select`.
 
 
 VIM.UI.SELECT                                               *ezpick-ui-select*
 
 `vim.ui.select` is a global other plugins may also want, so ezpick does not
-take it over. Assign it yourself to route it through the picker:
+take it over. Assign it yourself:
 
 >lua
     vim.ui.select = require("ezpick.select")
@@ -197,24 +193,25 @@ BUILT-IN SOURCES                                            *ezpick-built-ins*
   spell_suggest                       Spelling suggestions for the word
                                       under the cursor
   -----------------------------------------------------------------------
-The four location sources (`lsp_definitions`, `lsp_declarations`,
-`lsp_implementations`, `lsp_type_definitions`) jump straight to their target
-when the server answers with exactly one. `lsp_workspace_symbols` asks the
-server once with an empty query and filters the answer locally; servers that
-refuse an empty query return nothing. `lsp_incoming_calls` lands on each call
-site inside the caller, while `lsp_outgoing_calls` lands on each callee’s own
-definition. `colorschemes` applies each scheme as the cursor moves over it and
-restores the original one if the picker is closed without a choice.
-`command_history` and `search_history` put the chosen entry back on the command
-line unexecuted, ready to edit.
+Notes:
 
-`resume` reopens the previous picker with its last query and cursor position,
-without re-running the source’s setup step.
+- `lsp_definitions`, `lsp_declarations`, `lsp_implementations` and
+    `lsp_type_definitions` jump straight to their target on a single result.
+- `lsp_workspace_symbols` asks the server once with an empty query and filters
+    locally; servers that refuse an empty query return nothing.
+- `lsp_incoming_calls` lands on each call site inside the caller;
+    `lsp_outgoing_calls` lands on each callee’s definition.
+- `colorschemes` applies each scheme as the cursor moves and restores the
+    original one if the picker is closed without a choice.
+- `command_history` and `search_history` put the chosen entry back on the
+    command line unexecuted.
+- `resume` reopens the previous picker with its last query and cursor position,
+    without re-running the source’s setup step.
 
 
 KEYS INSIDE A PICKER                                             *ezpick-keys*
 
-Inside a picker, `g?` shows the full list:
+`g?` shows the full list:
 
   Key             Action
   --------------- ----------------------------------------
@@ -230,61 +227,79 @@ Inside a picker, `g?` shows the full list:
 FLAGS                                                           *ezpick-flags*
 
 Sources can accept flags beside the query. The prompt line holds one section at
-a time. `<C-f>` switches between them.
+a time; `<C-f>` switches between them.
 
-Writing the query, each written flag stands in front of it as a pill (`hidden`
-`dir=src`). With no flags written there is no prefix at all. The last pill
-closes before the line, so a leading space in the query is visible. Writing the
-flags, the prefix reads `Flags❯` and the line holds the flags alone; the
-query is not shown.
+- Query section: each written flag stands in front of the line as a pill
+    (`hidden` `dir=src`), the last pill closing before the line so a leading
+    space in the query is visible.
+- Flags section: the prefix reads `Flags❯` and the line holds the flags alone.
 
-The query is therefore verbatim. Spaces, backslashes and dashes in it are
-ordinary characters, and nothing in it needs escaping. The flags line holds
-flags and nothing else; a word naming none is a mistake. Leaving the flags
-squeezes the gaps typing them opened down to one space each; an escaped space
-(`dir=my\ src`) is part of a value and stays as written. Completion opens on
-arriving at an empty flags section and as you type (disable with
-`auto_complete_flags`).
+Consequences:
 
-Switches are written `<name>`, filters `<name>=<value>`. Escape with `\` to put
-a space or a backslash in a value: `dir=my\ src`, `dir=a\\b`. Escaping follows
-Neovim’s rule for command arguments (|<f-args>|), plus `\,` for a literal
-comma: only whitespace, `,` and `\` are escapable, and a `\` before anything
-else is that character. The `=` form is exact, so a value can be empty
-(`filter=`) or read as a flag name (`dir=hidden`). Names are matched loosely:
-`no-ignore`, `noignore` and `NoIgnore` are the same flag.
+- The query is verbatim — spaces, backslashes and dashes are ordinary
+    characters and nothing needs escaping.
+- Leaving the flags squeezes the gaps typing them opened down to one space
+    each; an escaped space (`dir=my\ src`) is part of a value and stays.
+- Completion opens on arriving at an empty flags section and as you type
+    (disable with `auto_complete_flags`).
 
-A filter that takes several values takes them comma-separated, in one go:
-`type=lua,rust`, `filter=*.lua,*.md`. Write a filter at most once; repeating
-one is a mistake, and the last occurrence wins.
+Syntax:
 
-A switch is set by being written, so it takes no value. `hidden=false` and
-`hidden=true` are the same mistake, and both leave the switch alone. Writing a
-switch twice is no mistake: setting it again sets it.
+- Switches are `<name>`, filters `<name>=<value>`.
+- `\` escapes a space or backslash in a value: `dir=my\ src`, `dir=a\\b`.
+    Escaping follows |<f-args>| plus `\,` for a literal comma — only
+    whitespace, `,` and `\` are escapable, and a `\` before anything else is that
+    character.
+- The `=` form is exact, so a value can be empty (`filter=`) or read as a flag
+    name (`dir=hidden`).
+- Names match loosely: `no-ignore`, `noignore` and `NoIgnore` are one flag.
+- A filter taking several values takes them comma-separated in one go:
+    `type=lua,rust`, `filter=*.lua,*.md`.
+- Repeating a filter is a mistake; the last occurrence wins. A switch takes no
+    value, so `hidden=false` and `hidden=true` are the same mistake and both
+    leave the switch alone. Writing a switch twice is no mistake.
 
-Every mistake reads the same way. A typo’d flag, a missing value, a value
-outside a flag’s set, or a word naming no flag gets an underline and a short
-message under the prompt, and the search stops until the flags read one way or
-the other. An error about the flag the cursor is still inside waits until the
-cursor moves on, so writing a flag out correctly is silent. Away from the flags
-the error still shows, so a stopped search always says why.
+Errors — a typo’d flag, a missing value, a value outside a flag’s set, a
+word naming no flag — all read the same way:
 
-`:Ezpick` keeps the two apart the same way: `-f` takes one flag and may be
-written once per flag. The first word that is not a flag opens the query, which
-runs to the end of the line and needs no quoting. A `--` opens the query too
-and is dropped, for a query whose own first word is `-f` or `--`.
+- an underline and a short message under the prompt;
+- the search stops until the flags parse;
+- a message about the flag the cursor is still inside waits until the cursor
+    moves on; away from the flags it shows at once, so a stopped search always
+    says why.
 
-A query too long for one line wraps rather than scrolling out of sight. The
-prompt grows a row at a time to hold it, taking the rows from the list, up to
-an even split with it.
+`:Ezpick` keeps the two apart the same way:
 
-`files` accepts `dir`, `fixed`, `glob`, `inpath`, `case`, `nocase`, `follow`,
-`hidden`. `live_grep` accepts `dir`, `filter`, `type`, `regex`, `case`,
-`nocase`, `word`, `line`, `invert`, `follow`, `hidden`, `no-ignore`,
-`max-depth`. `marks` accepts `global` and `buffer`, `registers` accepts
-`empty`, and the symbol sources accept one boolean per LSP symbol kind
-(`Function`, `Class`, …), several of which are OR’d together.
+- `-f` takes one flag and may be written once per flag.
+- The first word that is not a flag opens the query, which runs to the end of
+    the line and needs no quoting.
+- A `--` opens the query too and is dropped — for a query whose own first word
+    is `-f` or `--`.
 
+A query too long for one line wraps rather than scrolling out of sight: the
+prompt grows a row at a time, taking rows from the list, up to an even split
+with it.
+
+Flags per source:
+
+  -----------------------------------------------------------------------
+  Source                              Flags
+  ----------------------------------- -----------------------------------
+  files                               dir, fixed, glob, inpath, case,
+                                      nocase, follow, hidden
+
+  live_grep                           dir, filter, type, regex, case,
+                                      nocase, word, line, invert, follow,
+                                      hidden, no-ignore, max-depth
+
+  marks                               global, buffer
+
+  registers                           empty
+
+  symbol sources                      one boolean per LSP symbol kind
+                                      (Function, Class, …), several OR’d
+                                      together
+  -----------------------------------------------------------------------
 
 ==============================================================================
 5. Writing your own source                             *ezpick-custom-sources*
@@ -299,19 +314,20 @@ an even split with it.
     })
 <
 
-The spec may also be a function returning a spec, in which case it is built
-lazily on each open. See the `ezpick.PickerSpec` annotation in
-`lua/ezpick/init.lua` <lua/ezpick/init.lua> for every field.
+- The spec may also be a function returning a spec, built lazily on each open.
+- Every field: the `ezpick.PickerSpec` annotation in
+    `lua/ezpick/init.lua` <lua/ezpick/init.lua>.
 
-Built-ins and third-party sources share one flat namespace, so `register` never
-overwrites: a name already taken gets a counter appended (`tasks` →
-`tasks_2`), with a warning, and `register` returns the name actually used. Both
-sources stay reachable, and load order decides which one keeps the plain name,
-so prefix yours (`myplugin.tasks`) to stay out of the race.
+Naming:
 
-A name that could never be opened is an error rather than a warning: the empty
-string, a name containing whitespace (`:Ezpick` splits its arguments on it),
-and `resume` (handled by `:Ezpick` before the registry is consulted).
+- Built-ins and third-party sources share one flat namespace, so `register`
+    never overwrites: a taken name gets a counter appended (`tasks` → `tasks_2`),
+    with a warning, and `register` returns the name actually used.
+- Load order decides which one keeps the plain name, so prefix yours
+    (`myplugin.tasks`).
+- A name that could never be opened is an error rather than a warning: the
+    empty string, a name containing whitespace (`:Ezpick` splits its arguments on
+    it), and `resume` (handled by `:Ezpick` before the registry is consulted).
 
 
 ==============================================================================
@@ -325,11 +341,11 @@ and `resume` (handled by `:Ezpick` before the registry is consulted).
   EzPickFlagPill          Visual
   EzPickFlagPillEdge      derived: the background of EzPickFlagPill
 Filetype icons in `files` and `config_files` come from whichever icon provider
-is installed. ezpick ships no icon data of its own and tries, in order,
-`nvim-web-icon`, keystone.nvim <https://github.com/mbfoss/keystone.nvim>
-(`keystone.icons`) and mini.icons <https://github.com/echasnovski/mini.icons>;
-the first one found is used, and each icon is highlighted with the group its
-provider returns. With none installed, rows are rendered without icons.
+is installed. ezpick ships no icon data and tries, in order, `nvim-web-icon`,
+keystone.nvim <https://github.com/mbfoss/keystone.nvim> (`keystone.icons`) and
+mini.icons <https://github.com/echasnovski/mini.icons>; the first found is
+used, each icon highlighted with the group its provider returns. With none
+installed, rows are rendered without icons.
 
 Generated by panvimdoc <https://github.com/kdheepak/panvimdoc>
 

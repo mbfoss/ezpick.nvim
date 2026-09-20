@@ -31,6 +31,30 @@ local _WINHL             = "NormalFloat:Normal,FloatBorder:Normal,FloatTitle:Tit
 ---Fills the list's winbar, so it reads as the rule between prompt and items.
 local _RULE              = "─"
 
+---`NonText`'s foreground over the window's own background. The rule and the
+---virtual line's branch are drawn in it: a `NonText` carrying a background of
+---its own would otherwise paint those rows in it, breaking them against the
+---list around them.
+local _HL_RULE           = "EzPickRule"
+
+local function _set_rule_hl()
+	local src = vim.api.nvim_get_hl(0, { name = "NonText", link = false })
+	vim.api.nvim_set_hl(0, _HL_RULE, {
+		fg      = src.fg,
+		ctermfg = src.ctermfg,
+		bg      = "NONE",
+		ctermbg = "NONE",
+	})
+end
+
+_set_rule_hl()
+
+-- `:colorscheme` clears the derived group along with the one it came from.
+vim.api.nvim_create_autocmd("ColorScheme", {
+	group    = vim.api.nvim_create_augroup("ezpick_rule_hl", { clear = true }),
+	callback = _set_rule_hl,
+})
+
 ---Closes the flags-mode prefix, which is a label rather than a flag.
 local _PREFIX_MARK       = "› "
 
@@ -943,6 +967,7 @@ function Picker:_create_windows()
 		end)
 		vim.wo[self.vwin].wrap = true
 		vim.wo[self.vwin].winhighlight = _WINHL
+		vim.wo[self.vwin].conceallevel = 3
 	end
 end
 
@@ -1233,7 +1258,7 @@ function Picker:_status_winbar()
 		text = text .. string.format(" %d/%d", self:get_cursor() or 1, total)
 	end
 	-- A spinner frame is arbitrary text; `%` in a winbar is an item introducer.
-	return "%#NonText#%=" .. text:gsub("%%", "%%%%")
+	return "%#" .. _HL_RULE .. "#%=" .. text:gsub("%%", "%%%%")
 end
 
 ---Redraw the rule's right end, which carries both the spinner and the position
@@ -1275,7 +1300,7 @@ function Picker:_render_virt_line(row, cursor)
 	local item = self.list_items[row]
 	if not item or not item.virt_line or #item.virt_line == 0 then return end
 
-	local chunks = { { _LIST_PREFIX }, { "╰─ ", "NonText" } }
+	local chunks = { { _LIST_PREFIX }, { "╰─ ", _HL_RULE } }
 	vim.list_extend(chunks, item.virt_line)
 	if cursor then
 		local width = vim.fn.strdisplaywidth(chunks[1][1])
