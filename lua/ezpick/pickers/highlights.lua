@@ -8,9 +8,9 @@ local _attrs = {
 
 ---@type ezpick.queryflags.FlagDef[]
 local FLAGS = {
-    { name = "linksto", type = "value",   multi = true, slot = "group", desc = "filter by link target group" },
+    { name = "linksto", type = "value",   multi = true,                                   slot = "group",  desc = "filter by link target group" },
     { name = "linked",  type = "boolean", desc = "only groups that link to another group" },
-    { name = "attr",    type = "value",   multi = true, values = _attrs, slot = "name", desc = "has attribute: bold, italic, underline, ..." },
+    { name = "attr",    type = "value",   multi = true,                                   values = _attrs, slot = "name",                       desc = "has attribute: bold, italic, underline, ..." },
 }
 
 ---@param name string
@@ -55,7 +55,7 @@ local function highlight_to_item(name, hl)
 
     return {
         label_chunks = chunks,
-        data         = { name = name },
+        data         = { name = name, highlight = hl },
     }
 end
 
@@ -66,7 +66,7 @@ function M.spec()
     return {
         prompt         = "Highlights",
         flags          = FLAGS,
-        enable_preview = false,
+        enable_preview = true,
         finder         = function(query, flags, _, callback)
             local items = {}
             for name, hl in pairs(highlights) do
@@ -76,7 +76,51 @@ function M.spec()
             end
             callback(items)
         end,
-        on_confirm = function(data)
+        previewer      = function(data, _, callback)
+            local h = data.highlight
+
+            local lines = {
+                data.name or "Unknown",
+                "",
+                "# Colors",
+                ("- **Foreground:** %s"):format(h.fg and ("#%06X"):format(h.fg) or "none"),
+                ("- **Background:** %s"):format(h.bg and ("#%06X"):format(h.bg) or "none"),
+                "",
+                "# Styles",
+            }
+            local styles = {
+                "bold",
+                "italic",
+                "underline",
+                "undercurl",
+                "strikethrough",
+                "reverse",
+                "standout",
+                "nocombine",
+            }
+            local found_style = false
+            for _, style in ipairs(styles) do
+                if h[style] then
+                    table.insert(lines, "- " .. style)
+                    found_style = true
+                end
+            end
+            if not found_style then
+                table.insert(lines, "")
+            end
+            if h.link then
+                vim.list_extend(lines, {
+                    "# Link",
+                    ("%s"):format(h.link),
+                })
+            end
+            callback({
+                content = lines,
+                filetype = "markdown",
+            })
+            return function() end
+        end,
+        on_confirm     = function(data)
             if data then vim.api.nvim_put({ data.name }, "c", true, true) end
         end,
     }
