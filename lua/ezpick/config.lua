@@ -11,6 +11,7 @@ local M = {}
 ---@field without_preview ezpick.Picker.Geometry? Sizing while it is not.
 ---@field auto_complete_flags boolean? Auto-open flag completion on an empty flags line and while typing (default true).
 ---@field command_alias string? Name of an extra user command running the same handler and completion as `:Ezpick` (for example "Pick").
+---@field rg_path string? Path to the ripgrep executable the `live_grep` picker runs (default "rg", resolved on `PATH`).
 
 ---@return ezpick.Config
 local function _defaults()

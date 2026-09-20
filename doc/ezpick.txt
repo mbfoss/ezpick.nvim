@@ -66,11 +66,15 @@ On Neovim 0.11, use a plugin manager.
       },
       auto_complete_flags = true, -- auto-open flag completion on an empty flags line and while typing
       command_alias       = "Pick", -- extra command with the same handler and completion as `:Ezpick` (unset by default)
+      rg_path             = nil, -- ripgrep executable for `live_grep` (unset: "rg" off the `PATH`)
     })
 <
 
 `command_alias` defines a second user command running the same handler and
 completion as `:Ezpick`, for a shorter name.
+
+`rg_path` points `live_grep` at a particular ripgrep, for a build that is not
+on the `PATH`.
 
 
 ==============================================================================

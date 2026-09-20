@@ -46,6 +46,7 @@ end
 ---them and the unknown-key test below would otherwise call them misspellings.
 local _OPTIONAL = {
     command_alias = true,
+    rg_path       = true,
 }
 
 ---Collect the options whose value differs from the default, as flat paths with

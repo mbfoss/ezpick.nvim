@@ -5,6 +5,16 @@ local strutil          = require("ezpick.util.strutil")
 local fsutil           = require("ezpick.util.fsutil")
 local spawn            = require("ezpick.util.spawn")
 local pickertools      = require("ezpick.base.pickertools")
+local config           = require("ezpick.config")
+
+---The ripgrep executable: `rg_path` when set, otherwise `rg` off the `PATH`.
+---Read per call so a `setup()` after this module loaded is honoured.
+---@return string
+local function rg_exe()
+    local path = config.current.rg_path
+    if path and path ~= "" then return path end
+    return "rg"
+end
 
 --- High-water mark (bytes) for stdin backpressure: buffers are fed to rg ahead
 --- of itself for throughput, but once its stdin write queue is backed up past
@@ -105,8 +115,9 @@ local function rg_types()
     if _rg_types then return _rg_types end
 
     local types = {}
-    if vim.fn.executable("rg") == 1 then
-        local res = vim.system({ "rg", "--type-list" }, { text = true }):wait()
+    local exe   = rg_exe()
+    if vim.fn.executable(exe) == 1 then
+        local res = vim.system({ exe, "--no-config", "--type-list" }, { text = true }):wait()
         if res.code == 0 then
             for line in vim.gsplit(res.stdout or "", "\n", { trimempty = true }) do
                 local name, globs = line:match("^([^:]+):%s*(.+)$")
@@ -157,7 +168,9 @@ local FLAGS = {
 ---@return string[] args
 local function build_rg_base(parsed)
     local flags = parsed.flags
-    local args  = { "--json", "--no-heading", "--glob-case-insensitive" }
+    -- --no-config: the user's RIPGREP_CONFIG_PATH must not change the flags
+    -- this picker depends on (--json output, match semantics).
+    local args  = { "--no-config", "--json", "--no-heading", "--glob-case-insensitive" }
 
     if flags.follow then
         table.insert(args, "--follow")
@@ -228,7 +241,7 @@ local function build_rg_dir_cmd(parsed)
     table.insert(args, "--")
     table.insert(args, parsed.query)
     table.insert(args, ".")
-    return vim.list_extend({ "rg" }, args)
+    return vim.list_extend({ rg_exe() }, args)
 end
 
 --- Compile a glob list, dropping any that fail (the prompt is compiled on every
@@ -407,7 +420,7 @@ local function build_rg_stdin_cmd(parsed)
     table.insert(args, "--")
     table.insert(args, parsed.query)
     table.insert(args, "-")
-    return vim.list_extend({ "rg" }, args)
+    return vim.list_extend({ rg_exe() }, args)
 end
 
 --- Precompute where each buffer begins in the concatenated stdin stream:
