@@ -66,9 +66,15 @@ require("ezpick").setup({
     height_ratio = 0.7,
   },
   auto_complete_flags = true, -- auto-open flag completion on an empty flags line and while typing
-  command_alias       = "Pick", -- extra command with the same handler and completion as `:Ezpick` (unset by default)
   rg_path             = nil, -- ripgrep executable for `live_grep` (unset: "rg" off the `PATH`)
 })
+```
+
+A shorter command name, with the same completion as `:Ezpick`:
+
+```lua
+vim.api.nvim_create_user_command("Pick", function(o) vim.cmd { cmd = "Ezpick", args = o.fargs } end,
+  { nargs = "*", complete = function(_, l) return vim.fn.getcompletion(l:gsub("^Pick", "Ezpick", 1), "cmdline") end })
 ```
 
 ## Health <!-- tag: health -->
@@ -79,7 +85,7 @@ require("ezpick").setup({
 
 Reports:
 
-- the commands in place (`:Ezpick`, and `command_alias` when set);
+- whether `:Ezpick` is registered;
 - the options that differ from the defaults;
 - as a warning, any option name ezpick does not define — `setup()` merges the
   table wholesale, so a misspelled one would otherwise be accepted in silence.

@@ -201,26 +201,11 @@ function M.apply_highlights()
     vim.api.nvim_set_hl(0, "EzPickFlagPill", { default = true, link = "Visual" })
 end
 
----The alias currently created from `config.command_alias`, so a second
----`setup()` can drop the one it replaces.
----@type string?
-local _alias_command = nil
-
 ---Optional: `:Ezpick` and the highlight groups are set up by
 ---`plugin/ezpick.lua`, so this is only needed to change the defaults.
 ---@param opts ezpick.Config?
 function M.setup(opts)
     cfgmod.apply(opts)
-
-    local alias = M.config.command_alias
-    if _alias_command and _alias_command ~= alias then
-        vim.api.nvim_del_user_command(_alias_command)
-        _alias_command = nil
-    end
-    if alias and alias ~= "" and alias ~= _alias_command then
-        require("ezpick.cmdline").create_command(alias)
-        _alias_command = alias
-    end
 end
 
 return M

@@ -145,19 +145,4 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
     return _complete_cmdline(registry, parts[2], before, arg_lead)
 end
 
----Define a user command running the same handler and completion as `:Ezpick`.
----Used by `setup()` for `command_alias`.
----@param name string
-function M.create_command(name)
-    vim.api.nvim_create_user_command(name, function(cmd_opts)
-        M.run(cmd_opts)
-    end, {
-        nargs    = "*",
-        desc     = "Picker for files, grep etc...",
-        complete = function(arg_lead, cmd_line, cursor_pos)
-            return M.complete(arg_lead, cmd_line, cursor_pos)
-        end,
-    })
-end
-
 return M

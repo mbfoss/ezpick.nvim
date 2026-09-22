@@ -1,6 +1,6 @@
 ---@brief Health check for ezpick.nvim — run with `:checkhealth ezpick`.
 ---
----Reports the Neovim version, the commands, and the options that differ from
+---Reports the Neovim version, the `:Ezpick` command, and the options that differ from
 ---the defaults. `setup()` is optional, so the config is reported either way.
 
 local M = {}
@@ -18,7 +18,6 @@ local function _check_requirements()
 end
 
 ---`:Ezpick` comes from `plugin/ezpick.lua`, so it exists without a `setup()`.
----The alias is registered by `setup()` from `command_alias`.
 local function _check_commands()
     health.start("ezpick: commands")
 
@@ -29,24 +28,12 @@ local function _check_commands()
             "plugin/ezpick.lua did not run; check the plugin is on the runtimepath",
         })
     end
-
-    local alias = require("ezpick.config").current.command_alias
-    if not alias or alias == "" then
-        health.info("`command_alias` is unset, so no second command is registered")
-    elseif vim.fn.exists(":" .. alias) == 2 then
-        health.ok((":%s is registered (command_alias)"):format(alias))
-    else
-        health.warn((":%s is not registered"):format(alias), {
-            "require('ezpick').setup() has not been called yet",
-        })
-    end
 end
 
 ---Options that are valid but have no default, so `defaults[key]` is nil for
 ---them and the unknown-key test below would otherwise call them misspellings.
 local _OPTIONAL = {
-    command_alias = true,
-    rg_path       = true,
+    rg_path = true,
 }
 
 ---Collect the options whose value differs from the default, as flat paths with
