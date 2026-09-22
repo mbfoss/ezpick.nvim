@@ -70,11 +70,12 @@ require("ezpick").setup({
 })
 ```
 
-A shorter command name, with the same completion as `:Ezpick`:
+To use a shorter name such as `:Pick`, define a command that forwards its
+arguments and completion to `:Ezpick`:
 
 ```lua
 vim.api.nvim_create_user_command("Pick", function(o) vim.cmd { cmd = "Ezpick", args = o.fargs } end,
-  { nargs = "*", complete = function(_, l) return vim.fn.getcompletion(l:gsub("^Pick", "Ezpick", 1), "cmdline") end })
+  { nargs = "*", complete = function(_, l) return vim.fn.getcompletion((l:gsub("^[%s:]*%a+", "Ezpick", 1)), "cmdline") end })
 ```
 
 ## Health <!-- tag: health -->
