@@ -6,7 +6,7 @@
 ---@param cmd      string[]
 ---@param opts     { cwd?: string, env: {string:string}?, stdin?: boolean, stdout?: fun(data:string), stderr?: fun(data:string) }
 ---@param on_exit  fun(code:integer)
----@return ezpick.util.SpawnHandle?
+---@return ezpick.util.SpawnHandle? handle, string? err  -- err set when the process could not be started
 local function spawn(cmd, opts, on_exit)
     -- stdin is opt-in: only commands that read from stdin (the rg `-` target)
     -- get a pipe, so others keep inheriting/ignoring stdin exactly as before.
@@ -55,8 +55,9 @@ local function spawn(cmd, opts, on_exit)
     end
 
     local handle ---@type uv.uv_process_t?
+    local spawn_err ---@type string?
     ---@diagnostic disable-next-line: missing-fields
-    handle = vim.uv.spawn(cmd[1], {
+    handle, spawn_err = vim.uv.spawn(cmd[1], {
         args  = vim.list_slice(cmd, 2),
         cwd   = opts.cwd,
         env = env,
@@ -73,10 +74,13 @@ local function spawn(cmd, opts, on_exit)
         end
     end)
 
+    -- vim.uv.spawn reports a failed exec (bad executable path) by returning
+    -- nil plus an error string rather than raising, so the error is handed back
+    -- to the caller; on_exit still fires so pending work settles.
     if not handle then
         close_pipes()
         vim.schedule(function() on_exit(-1) end)
-        return nil
+        return nil, spawn_err or "failed to spawn " .. tostring(cmd[1])
     end
 
     local out = assert(stdout)

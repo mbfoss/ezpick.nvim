@@ -588,28 +588,27 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
             end
         end
 
-        local ok = pcall(function()
-            buf_handle = spawn(
-                build_rg_stdin_cmd(parsed),
-                {
-                    cwd    = cwd,
-                    stdin  = true,
-                    stdout = function(data)
-                        if not stop_buf then buf_feed(data) end
-                    end,
-                },
-                function()
-                    buf_done = true
-                    settle()
-                end
-            )
-        end)
+        buf_handle = spawn(
+            build_rg_stdin_cmd(parsed),
+            {
+                cwd    = cwd,
+                stdin  = true,
+                stdout = function(data)
+                    if not stop_buf then buf_feed(data) end
+                end,
+            },
+            function()
+                buf_done = true
+                settle()
+            end
+        )
 
-        if ok and buf_handle then
+        -- A failed spawn still fires its exit callback, so settle() is not
+        -- called here; the directory search reports the error (same exe).
+        if buf_handle then
             pump(1)
         else
             buf_done = true
-            settle()
         end
     end
 
@@ -648,25 +647,26 @@ local function async_grep(parsed, grep_opts, fetch_opts, callback)
         end
     end)
 
-    local ok, err = pcall(function()
-        dir_handle = spawn(
-            build_rg_dir_cmd(parsed),
-            {
-                cwd    = cwd,
-                stdout = function(data)
-                    if not stop_read then buffered_feed(data) end
-                end,
-                stderr = function(data)
-                    on_error(data)
-                end,
-            },
-            function() settle() end
-        )
-    end)
+    local spawn_err
+    dir_handle, spawn_err = spawn(
+        build_rg_dir_cmd(parsed),
+        {
+            cwd    = cwd,
+            stdout = function(data)
+                if not stop_read then buffered_feed(data) end
+            end,
+            stderr = function(data)
+                on_error(data)
+            end,
+        },
+        function() settle() end
+    )
 
-    if not ok then
-        on_error(err or "failed to launch ripgrep")
-        vim.schedule(settle)
+    -- An unusable `rg_path` fails here, not on stderr: report it in the result
+    -- list rather than showing an empty picker. settle() comes from spawn's
+    -- exit callback, which fires even when the process never started.
+    if not dir_handle then
+        on_error(string.format("ripgrep (%s): %s", rg_exe(), spawn_err or "failed to start"))
     end
 
     return function()
