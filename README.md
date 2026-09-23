@@ -156,8 +156,8 @@ vim.ui.select = require("ezpick.select")
 
 Notes:
 
-- `files` walks the folder with libuv (`fs_scandir`) in pure Lua, no `fd`; it
-  favors portability and features over raw speed.
+- `files` walks the folder with libuv (`fs_scandir`) in pure Lua, no `fd`;
+  portability and features over raw speed, though still fast enough on a typical project tree.
 - `live_grep` searches the in-memory text of open buffers, so unsaved
   modifications are included; files with no open buffer are searched on disk.
 - `lsp_definitions`, `lsp_declarations`, `lsp_implementations` and
