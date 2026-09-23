@@ -42,6 +42,13 @@ describe(":Ezpick arguments", function()
         assert.are.equal("my src", seen.flags.dir)
     end)
 
+    it("glues a -- after an escaped space, not the separator", function()
+        local flag_text, query = run("--flags dir=my\\ --")
+        assert.are.equal("dir=my\\ --", flag_text)
+        assert.are.equal("", query)
+        assert.are.equal("my --", seen.flags.dir)
+    end)
+
     it("takes the whole line as the query without --flags", function()
         local flag_text, query = run("fn%s+%w+ two")
         assert.are.equal("", flag_text)
