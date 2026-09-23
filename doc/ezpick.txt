@@ -12,7 +12,7 @@ Table of Contents                                   *ezpick-table-of-contents*
   - Keys inside a picker                                         |ezpick-keys|
   - Flags                                                       |ezpick-flags|
 5. Writing your own source                             |ezpick-custom-sources|
-6. Highlight groups                                        |ezpick-highlights|
+6. Highlights                                              |ezpick-highlights|
 A dependency-free fuzzy picker for Neovim.
 
 Built-in sources (files, live grep, buffers, LSP symbols and references,
@@ -21,7 +21,7 @@ command. It can replace `vim.ui.select`, and other plugins can register their
 own sources.
 
 
-  **Requires Neovim ≥ 0.11.** No plugin dependencies. `live_grep` requires
+  **Requires Neovim >= 0.11.** No plugin dependencies. `live_grep` requires
   ripgrep <https://github.com/BurntSushi/ripgrep> on `$PATH`; every other source,
   `files` included, is pure Lua.
 
@@ -338,7 +338,7 @@ Naming:
 
 
 ==============================================================================
-6. Highlight groups                                        *ezpick-highlights*
+6. Highlights                                              *ezpick-highlights*
 
   Group                   Links to
   ----------------------- -------------------------------------------

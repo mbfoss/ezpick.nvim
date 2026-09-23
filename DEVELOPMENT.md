@@ -67,8 +67,8 @@ fetch loop. Everything user-visible happens here.
 
 - The two prompt sections never share a line: the flags are a mode of their own
   (`<C-f>`), and the parser is handed the flags alone, with the query one line
-  over. So a name needs no marking prefix, and a word naming no flag is simply
-  a mistake.
+  over. So a name needs no marking prefix, and a word naming no flag is a
+  mistake.
 - Everything outside the prompt keeps the two apart too: `Picker.initial_flags`
   beside `initial_query`, `on_close(query, flag_text, index)`, `:Ezpick -f`
   beside `:Ezpick -q`, and the query history, which `_encode_history` writes as

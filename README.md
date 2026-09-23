@@ -7,7 +7,7 @@ diagnostics, quickfix, keymaps, commands and more) behind a single `:Ezpick`
 command. It can replace `vim.ui.select`, and other plugins can register their
 own sources.
 
-> **Requires Neovim ≥ 0.11.** No plugin dependencies. `live_grep` requires
+> **Requires Neovim >= 0.11.** No plugin dependencies. `live_grep` requires
 > [ripgrep](https://github.com/BurntSushi/ripgrep) on `$PATH`; every other
 > source, `files` included, is pure Lua.
 
@@ -277,7 +277,7 @@ Naming:
   empty string, a name containing whitespace (`:Ezpick` splits its arguments on
   it), and `resume` (handled by `:Ezpick` before the registry is consulted).
 
-## Highlight groups <!-- tag: highlights -->
+## Highlights <!-- tag: highlights -->
 
 | Group | Links to |
 | --- | --- |
@@ -296,8 +296,12 @@ installed, rows are rendered without icons.
 
 <!-- panvimdoc-ignore-start -->
 
-## License
+## License <!-- tag: license -->
 
 [MIT](LICENSE). Third-party credits: [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+
+## Development <!-- tag: development -->
+
+Internals, tests and conventions: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 <!-- panvimdoc-ignore-end -->
