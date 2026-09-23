@@ -33,76 +33,79 @@ local function _read_token(str, i)
 end
 
 ---Cut the `:Ezpick` arguments past the source name into the two prompt sections.
----`-f` takes one flag, written as the flags line writes it; the first token that
----is not a flag opens the query, which runs to the end of the line, so a query
----needs no quoting and nothing in it is read as a flag. A `--` opens the query
----as well and is dropped, for a query whose first word is `-f` or `--`.
+---A line opening on `--flags` reads everything up to the `--` that closes it as
+---the flags, and the rest as the query; a line opening on anything else is the
+---query alone, so a query needs no quoting and nothing in it is read as a flag.
 ---@param rest string
----@return string flags, string query, string? err
+---@return string flags, string query
 local function _parse_cmdline(rest)
-    local flags = {}
-    local i     = 1
-
-    while true do
-        local start = i
-        local tok
-        tok, i = _read_token(rest, i)
-        if not tok then break end
-
-        if tok == "-f" then
-            local flag
-            flag, i = _read_token(rest, i)
-            if not flag then return "", "", "-f needs a flag" end
-            flags[#flags + 1] = flag
-        elseif tok == "--" then
-            return table.concat(flags, " "), (rest:sub(i):gsub("^%s+", ""))
-        else
-            return table.concat(flags, " "), (rest:sub(start):gsub("^%s+", ""))
-        end
+    local tok, i = _read_token(rest, 1)
+    if tok ~= "--flags" then
+        return "", rest
     end
 
-    return table.concat(flags, " "), ""
+    local flags = {}
+    while true do
+        local t
+        t, i = _read_token(rest, i)
+        if not t or t == "--" then break end
+        flags[#flags + 1] = t
+    end
+    return table.concat(flags, " "), (rest:sub(i):gsub("^%s+", ""))
 end
 
 ---Candidates for the word under the cursor on the `:Ezpick` line, past the source
----name. Only a `-f` argument is completed: the flag parser answers for it, and
----the query, whether it was opened by a word or by `--`, is free text.
+---name. `--flags` opens the flags section and is itself completed while the word
+---being typed is still a prefix of it; the section is then completed from the
+---source's schema until its `--` opens the query, which is free text. A line
+---opening on anything else is already the query.
 ---@param registry table
 ---@param source string
 ---@param before string    -- the command line up to the cursor
 ---@param arg_lead string
 ---@return string[]
 local function _complete_cmdline(registry, source, before, arg_lead)
-    -- The word under the cursor, and the token in front of it. The command name
-    -- and the source name are read off first: the arguments start past them.
-    local head       = before:sub(1, #before - #arg_lead)
-    local prev       = nil
-    local i          = 1
-    i = select(2, _read_token(head, i))
-    i = select(2, _read_token(head, i))
-    while true do
-        local tok
-        tok, i = _read_token(head, i)
-        if not tok then break end
-        -- Anything that is not `-f` or its value opens the query: free text.
-        if prev ~= "-f" and tok ~= "-f" then return {} end
-        prev = tok
+    -- The completed tokens behind the cursor: everything up to the word being
+    -- typed, which `arg_lead` holds back.
+    local head = before:sub(1, #before - #arg_lead)
+    local i    = 1
+    i = select(2, _read_token(head, i)) -- command name
+    i = select(2, _read_token(head, i)) -- source name
+
+    local first
+    first, i = _read_token(head, i)
+    if first == nil then
+        -- The word being typed is the first one past the source: it is, or is
+        -- still becoming, `--flags`.
+        return vim.tbl_filter(function(k) return vim.startswith(k, arg_lead) end, { "--flags" })
+    end
+    if first ~= "--flags" then
+        return {}
     end
 
-    if prev ~= "-f" then
-        return vim.tbl_filter(function(k) return vim.startswith(k, arg_lead) end, { "-f", "--" })
+    -- The flags section runs from just past `--flags` to its closing `--`; past
+    -- one, the cursor is in the query, which is free text.
+    local flags_line = head:sub(i) .. arg_lead
+    local j = 1
+    while true do
+        local t
+        t, j = _read_token(flags_line, j)
+        if not t then break end
+        if t == "--" then return {} end
     end
 
     local flags = registry.get_flags(source)
     if not flags then return {} end
 
     local queryflags = require("ezpick.base.queryflags")
-    local comps      = queryflags.get_completions(flags, arg_lead, #arg_lead)
+    local comps      = queryflags.get_completions(flags, flags_line, #flags_line)
     if not comps then return {} end
 
-    -- The cmdline replaces the whole argument, so each candidate is put back
-    -- behind whatever of it the completion did not claim ("dir=" before a path).
-    local kept = arg_lead:sub(1, comps.startcol - 1)
+    -- `get_completions` answers in columns of the whole flags line, but the
+    -- cmdline replaces only the word under the cursor, so the column is put back
+    -- onto that word. Whatever the completion does not claim ("dir=" before a
+    -- path) stays in front of it.
+    local kept = arg_lead:sub(1, comps.startcol - (#flags_line - #arg_lead) - 1)
     local out  = {}
     for _, item in ipairs(comps.items) do
         table.insert(out, kept .. item.word)
@@ -115,13 +118,9 @@ end
 function M.run(cmd_opts)
     local source = cmd_opts.fargs[1]
     -- `args` rather than `fargs`: Vim resolves the backslashes in `fargs`,
-    -- and a flag value keeps its own (`-f dir=my\ src`).
+    -- and a flag value keeps its own (`--flags dir=my\ src`).
     local rest = cmd_opts.args:match("^%S+%s+(.*)$") or ""
-    local flags, query, err = _parse_cmdline(rest)
-    if err then
-        vim.notify(err, vim.log.levels.WARN)
-        return
-    end
+    local flags, query = _parse_cmdline(rest)
     require("ezpick").pick(source, { flags = flags, query = query })
 end
 

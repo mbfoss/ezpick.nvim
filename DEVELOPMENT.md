@@ -70,10 +70,10 @@ fetch loop. Everything user-visible happens here.
   over. So a name needs no marking prefix, and a word naming no flag is a
   mistake.
 - Everything outside the prompt keeps the two apart too: `Picker.initial_flags`
-  beside `initial_query`, `on_close(query, flag_text, index)`, `:Ezpick -f`
-  beside `:Ezpick -q`, and the query history, which `_encode_history` writes as
-  JSON `{q=..,f=..}` once a flagged entry needs it and as the plain query
-  otherwise.
+  beside `initial_query`, `on_close(query, flag_text, index)`,
+  `:Ezpick --flags … --` beside the query that runs on after it, and the query
+  history, which `_encode_history` writes as JSON `{q=..,f=..}` once a flagged
+  entry needs it and as the plain query otherwise.
 - `\` escaping is local to a value and follows `:h <f-args>` plus the list
   separator: only whitespace, `,` and `\` are escapable.
 - A `multi` flag takes its values comma-separated in one token

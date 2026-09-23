@@ -230,11 +230,15 @@ naming no flag) all read the same way:
 
 `:Ezpick` keeps the two apart the same way:
 
-- `-f` takes one flag and may be written once per flag.
-- The first word that is not a flag opens the query, which runs to the end of
-  the line and needs no quoting.
-- A `--` opens the query too and is dropped, for a query whose own first word
-  is `-f` or `--`.
+- A line opening on `--flags` reads everything up to the `--` that closes it as
+  the flags, and the rest as the query:
+
+  ```vim
+  :Ezpick files --flags dir=src hidden -- TODO
+  ```
+
+- A line opening on anything else is the query alone, so a query needs no
+  quoting and nothing in it is read as a flag.
 
 A query too long for one line wraps rather than scrolling out of sight: the
 prompt grows a row at a time, taking rows from the list, up to an even split
