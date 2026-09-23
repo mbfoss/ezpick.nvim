@@ -9,7 +9,7 @@ local M = {}
 
 ---Read one whitespace-delimited token from `str`, starting at `i`. A '\'
 ---takes the character after it along, so an escaped space stays inside the
----token it was written in and the flags section receives it as written.
+---token. Escapes are left as written; queryflags resolves them.
 ---@param str string
 ---@param i   integer
 ---@return string? token, integer next_i
