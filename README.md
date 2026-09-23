@@ -126,7 +126,7 @@ vim.ui.select = require("ezpick.select")
 | `files` | Files under the cwd |
 | `config_files` | Files under `stdpath("config")` |
 | `recent_files` | The oldfiles list |
-| `live_grep` | ripgrep results |
+| `live_grep` | search the content of files including any modified unsaved files |
 | `buffer_lines` | Non-blank lines of the current buffer |
 | `buffers` | Loaded buffers |
 | `windows` | Open windows |
@@ -156,6 +156,8 @@ vim.ui.select = require("ezpick.select")
 
 Notes:
 
+- `live_grep` searches the in-memory text of open buffers, so unsaved
+  modifications are included; files with no open buffer are searched on disk.
 - `lsp_definitions`, `lsp_declarations`, `lsp_implementations` and
   `lsp_type_definitions` jump straight to their target on a single result.
 - `lsp_workspace_symbols` asks the server once with an empty query and filters
@@ -244,16 +246,6 @@ A query too long for one line wraps rather than scrolling out of sight: the
 prompt grows a row at a time, taking rows from the list, up to an even split
 with it.
 
-Flags per source:
-
-| Source | Flags |
-| --- | --- |
-| `files` | `dir`, `fixed`, `glob`, `inpath`, `case`, `nocase`, `follow`, `hidden` |
-| `live_grep` | `dir`, `filter`, `type`, `regex`, `case`, `nocase`, `word`, `line`, `invert`, `follow`, `hidden`, `no-ignore`, `max-depth` |
-| `marks` | `global`, `buffer` |
-| `registers` | `empty` |
-| symbol sources | one boolean per LSP symbol kind (`Function`, `Class`, …), several OR'd together |
-
 ## Writing your own source <!-- tag: custom-sources -->
 
 ```lua
@@ -273,10 +265,8 @@ require("ezpick").register("my_source", {
 Naming:
 
 - Built-ins and third-party sources share one flat namespace, so `register`
-  never overwrites: a taken name gets a counter appended (`tasks` → `tasks_2`),
+  never overwrites: a taken name gets a counter appended (`files` → `files_2`),
   with a warning, and `register` returns the name actually used.
-- Load order decides which one keeps the plain name, so prefix yours
-  (`myplugin.tasks`).
 - A name that could never be opened is an error rather than a warning: the
   empty string, a name containing whitespace (`:Ezpick` splits its arguments on
   it), and `resume` (handled by `:Ezpick` before the registry is consulted).
