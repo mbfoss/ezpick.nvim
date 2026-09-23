@@ -50,19 +50,19 @@ tests/                   busted specs
 
 ### The engine (`base`)
 
-**`picker.lua`** — the window, list rendering, preview, keymaps and the async
+**`picker.lua`**: the window, list rendering, preview, keymaps and the async
 fetch loop. Everything user-visible happens here.
 
-**`pickertools.lua`** — matching and highlighting helpers shared by sources:
+**`pickertools.lua`**: matching and highlighting helpers shared by sources:
 
-- `match_label` — fuzzy subsequence + highlight chunks;
-- `match_globs` — rg-style glob matching;
+- `match_label`: fuzzy subsequence + highlight chunks;
+- `match_globs`: rg-style glob matching;
 - `file_preview` / `buffer_preview` loaders; the latter previews `data.bufnr`
   when that buffer is loaded and falls back to the file on disk;
 - `make_history_provider`, persisting per-source query history under
   `stdpath("state")/ezpick/pickhist.<name>.json`.
 
-**`queryflags.lua`** — reads a flags line (`switch`, `key=value`,
+**`queryflags.lua`**: reads a flags line (`switch`, `key=value`,
 `key=one,two`) and drives flag completion.
 
 - The two prompt sections never share a line: the flags are a mode of their own
@@ -92,7 +92,7 @@ fetch loop. Everything user-visible happens here.
   an error's *message* is held back until the cursor leaves what it points at;
   the search stops either way.
 
-**`layouts.lua`** — geometry for the list/preview floats. The prompt's height
+**`layouts.lua`**: geometry for the list/preview floats. The prompt's height
 is an input: the picker measures what the query wraps to with
 `nvim_win_text_height` and asks for that many rows, which `_split_frame` grants
 out of the list's share, never past an even split with it.
@@ -142,9 +142,9 @@ Two properties make this work without per-source configuration:
 A source leaving `score` unset is never reordered. Three do so deliberately,
 each with the reason in the code:
 
-- `spell_suggest` — `spellsuggest()` already ranks by likelihood;
-- `quickfix` / `loclist` — the list's order belongs to whatever built it;
-- `jumplist` — recency is the reason you opened it.
+- `spell_suggest`: `spellsuggest()` already ranks by likelihood;
+- `quickfix` / `loclist`: the list's order belongs to whatever built it;
+- `jumplist`: recency is the reason you opened it.
 
 Other source behaviours:
 
@@ -153,7 +153,7 @@ Other source behaviours:
   `setup` may call back with `nil` data. The LSP location sources use the
   latter to jump straight to a lone result instead of showing a one-row picker.
 - `on_confirm` is called on *every* close, with `nil` when the picker was
-  dismissed — that is where a source undoes anything it did while previewing,
+  dismissed. That is where a source undoes anything it did while previewing,
   as `colorschemes` does when it restores the original scheme.
 
 ### Shared toolkit (`util`)

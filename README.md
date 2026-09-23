@@ -31,7 +31,7 @@ the file:
 
 ## Installation <!-- tag: installation -->
 
-**`vim.pack`** — the built-in package manager (Neovim >= 0.12,
+**`vim.pack`**: the built-in package manager (Neovim >= 0.12,
 `:help vim.pack`):
 
 ```lua
@@ -88,7 +88,7 @@ Reports:
 
 - whether `:Ezpick` is registered;
 - the options that differ from the defaults;
-- as a warning, any option name ezpick does not define — `setup()` merges the
+- as a warning, any option name ezpick does not define: `setup()` merges the
   table wholesale, so a misspelled one would otherwise be accepted in silence.
 
 ## Using the picker <!-- tag: usage -->
@@ -196,8 +196,8 @@ a time; `<C-f>` switches between them.
 
 Consequences:
 
-- The query is verbatim — spaces, backslashes and dashes are ordinary
-  characters and nothing needs escaping.
+- The query is verbatim: spaces, backslashes and dashes are ordinary characters
+  and nothing needs escaping.
 - Leaving the flags squeezes the gaps typing them opened down to one space
   each; an escaped space (`dir=my\ src`) is part of a value and stays.
 - Completion opens on arriving at an empty flags section and as you type
@@ -207,7 +207,7 @@ Syntax:
 
 - Switches are `<name>`, filters `<name>=<value>`.
 - `\` escapes a space or backslash in a value: `dir=my\ src`, `dir=a\\b`.
-  Escaping follows `:h <f-args>` plus `\,` for a literal comma — only
+  Escaping follows `:h <f-args>` plus `\,` for a literal comma. Only
   whitespace, `,` and `\` are escapable, and a `\` before anything else is that
   character.
 - The `=` form is exact, so a value can be empty (`filter=`) or read as a flag
@@ -219,8 +219,8 @@ Syntax:
   value, so `hidden=false` and `hidden=true` are the same mistake and both
   leave the switch alone. Writing a switch twice is no mistake.
 
-Errors — a typo'd flag, a missing value, a value outside a flag's set, a word
-naming no flag — all read the same way:
+Errors (a typo'd flag, a missing value, a value outside a flag's set, a word
+naming no flag) all read the same way:
 
 - an underline and a short message under the prompt;
 - the search stops until the flags parse;
@@ -233,7 +233,7 @@ naming no flag — all read the same way:
 - `-f` takes one flag and may be written once per flag.
 - The first word that is not a flag opens the query, which runs to the end of
   the line and needs no quoting.
-- A `--` opens the query too and is dropped — for a query whose own first word
+- A `--` opens the query too and is dropped, for a query whose own first word
   is `-f` or `--`.
 
 A query too long for one line wraps rather than scrolling out of sight: the
