@@ -1,4 +1,4 @@
----@brief Health check for ezpick.nvim — run with `:checkhealth ezpick`.
+---@brief Health check for ezpick.nvim - run with `:checkhealth ezpick`.
 ---
 ---Reports the Neovim version, the `:Ezpick` command, and the options that differ from
 ---the defaults. `setup()` is optional, so the config is reported either way.
@@ -61,7 +61,7 @@ local function _diff_config(current, defaults, prefix, out)
     return out
 end
 
----Report the options that differ from the defaults — the whole config would be
+---Report the options that differ from the defaults - the whole config would be
 ---mostly untouched defaults, and the point here is what this user changed.
 ---Anything set that the plugin does not define is flagged: `setup()` merges
 ---`opts` wholesale, so a misspelled option is kept silently.
