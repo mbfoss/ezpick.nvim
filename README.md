@@ -123,7 +123,7 @@ vim.ui.select = require("ezpick.select")
 
 | Source | What it lists |
 | --- | --- |
-| `files` | Files under the cwd |
+| `files` | Files in a folder (cwd by default) |
 | `config_files` | Files under `stdpath("config")` |
 | `recent_files` | The oldfiles list |
 | `live_grep` | search the content of files including any modified unsaved files |
