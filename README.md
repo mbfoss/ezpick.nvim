@@ -300,8 +300,4 @@ installed, rows are rendered without icons.
 
 [MIT](LICENSE). Third-party credits: [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
 
-## Development <!-- tag: development -->
-
-Internals, tests and conventions: [DEVELOPMENT.md](DEVELOPMENT.md).
-
 <!-- panvimdoc-ignore-end -->
