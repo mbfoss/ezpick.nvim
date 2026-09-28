@@ -56,10 +56,10 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 })
 
 ---Closes the flags-mode prefix, which is a label rather than a flag.
-local _PREFIX_MARK       = "› "
+local _PREFIX_MARK = "› "
 
 ---Names the flags section while it is the one being edited.
-local _FLAGS_LABEL       = "Flags"
+local _FLAGS_LABEL = "Flags"
 
 ---@class ezpick.picker.ItemData
 ---@field filepath string?
@@ -712,8 +712,9 @@ end
 function Picker:maybe_autocomplete()
 	if self.closed or self.opts.auto_complete_flags == false then return end
 	if self.mode ~= "flags" then return end
-	-- Skip while the menu is open: Vim filters it as you type.
 	if vim.fn.pumvisible() == 1 then return end
+	if vim.api.nvim_get_current_buf() ~= self.pbuf then return end
+	if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then return end
 
 	local flags = self.opts.flags
 	if not flags or #flags == 0 then return end
@@ -981,10 +982,10 @@ function Picker:_resize_window(win, cfg)
 	if not win or not vim.api.nvim_win_is_valid(win) then return false end
 	local cur = vim.api.nvim_win_get_config(win)
 	if cur.relative == cfg.relative
-			and cur.row == cfg.row
-			and cur.col == cfg.col
-			and cur.width == cfg.width
-			and cur.height == cfg.height then
+		and cur.row == cfg.row
+		and cur.col == cfg.col
+		and cur.width == cfg.width
+		and cur.height == cfg.height then
 		return false
 	end
 	vim.api.nvim_win_set_config(win, cfg)
@@ -1953,8 +1954,8 @@ function Picker:_apply_mode(mode)
 		self._query_col = col
 	end
 
-	self.mode  = mode
-	local text = self:_mode_text()
+	self.mode                   = mode
+	local text                  = self:_mode_text()
 	-- Writing the section fires TextChangedI; the menu was just answered, so it is
 	-- not to be reopened on arrival.
 	self._suppress_autocomplete = true
@@ -1962,30 +1963,12 @@ function Picker:_apply_mode(mode)
 	vim.api.nvim_win_set_cursor(self.pwin, { 1, self:_mode_col(text) })
 	vim.b[self.pbuf].ezpick_completion = { flags = mode == "flags" and self.opts.flags or {} }
 	self:render_prompt_highlight()
-	if mode == "flags" and text == "" then self:_complete_empty_flags() end
-end
 
----Open the flag menu on arriving at an empty flags section, so what can be
----written is shown without a first character being typed.
----@return nil
-function Picker:_complete_empty_flags()
-	if self.closed or self.opts.auto_complete_flags == false then return end
-	local flags = self.opts.flags
-	if not flags or #flags == 0 then return end
-	if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then return end
-
-	-- The section was just written; its TextChangedI, whose auto-trigger is
-	-- suppressed, settles before the menu is asked for.
-	vim.schedule(function()
-		if self.closed or self.mode ~= "flags" then return end
-		if vim.fn.pumvisible() == 1 then return end
-		if vim.api.nvim_get_current_buf() ~= self.pbuf then return end
-		if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then return end
-		if (vim.api.nvim_buf_get_lines(self.pbuf, 0, 1, false)[1] or "") ~= "" then return end
-		vim.api.nvim_feedkeys(
-			vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true), "n", false
-		)
-	end)
+	if mode == "flags" and self.opts.auto_complete_flags then
+		vim.schedule(function()
+			self:maybe_autocomplete()
+		end)
+	end
 end
 
 ---Switch between writing the query and writing the flags. Each section keeps its
@@ -2083,7 +2066,11 @@ function Picker:setup_input()
 		buffer = self.pbuf,
 		callback = function(ev)
 			self:apply_prompt()
-			if ev.event == "TextChangedI" then self:maybe_autocomplete() end
+			if ev.event == "TextChangedI" and self.opts.auto_complete_flags then
+				vim.schedule(function()
+					self:maybe_autocomplete()
+				end)
+			end
 		end
 	})
 
