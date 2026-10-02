@@ -68,12 +68,11 @@ own sources.
     })
 <
 
-To use a shorter name such as `:Pick`, define a command that forwards its
-arguments and completion to `:Ezpick`.
+To use a shorter name such as `:Pick`, register an alias — it forwards its
+arguments and completion to `:Ezpick`:
 
 >lua
-    vim.api.nvim_create_user_command("Pick", function(o) vim.cmd("Ezpick " .. o.args) end,
-      { nargs = "*", complete = function(_, l) return vim.fn.getcompletion((l:gsub("^[%s:]*%a+", "Ezpick", 1)), "cmdline") end })
+    require("ezpick").create_cmd_alias("Pick")
 <
 
 

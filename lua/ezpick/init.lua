@@ -208,4 +208,36 @@ function M.setup(opts)
     cfgmod.apply(opts)
 end
 
+---Register a user command `name` that forwards its arguments and completion to
+---`:Ezpick`, so the picker can be reached as e.g. `:Pick`. No range, because
+---`:Ezpick` takes none. A name already taken is left alone with a warning.
+---
+---The registration repeats the one in `plugin/ezpick.lua` rather than sharing
+---it: nothing under `lua/ezpick/` may be required at startup, and a helper both
+---could call would have to be. Both callbacks require `ezpick.cmdline` lazily,
+---so an alias costs nothing until it is used.
+---@param name string  a user command name: an uppercase letter, then word characters
+---@return boolean created  false when `name` was already taken
+function M.create_cmd_alias(name)
+    if type(name) ~= "string" or not name:match("^%u") then
+        error("[ezpick] create_cmd_alias() needs a user command name: "
+            .. "an uppercase letter, then word characters", 2)
+    end
+    if vim.api.nvim_get_commands({})[name] then
+        vim.notify(("[ezpick] :%s is already taken, so no alias was created"):format(name),
+            vim.log.levels.WARN)
+        return false
+    end
+    vim.api.nvim_create_user_command(name, function(cmd_opts)
+        require("ezpick.cmdline").run(cmd_opts)
+    end, {
+        nargs    = "*",
+        desc     = "Picker for files, grep etc... (alias for :Ezpick)",
+        complete = function(arg_lead, cmd_line, cursor_pos)
+            return require("ezpick.cmdline").complete(arg_lead, cmd_line, cursor_pos)
+        end,
+    })
+    return true
+end
+
 return M
