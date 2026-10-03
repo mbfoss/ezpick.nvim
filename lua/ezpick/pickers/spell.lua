@@ -10,11 +10,14 @@ local pickertools = require("ezpick.base.pickertools")
 function M.spec(opts)
     opts = opts or {}
 
-    local cursor_word = vim.fn.expand("<cword>")
-    if cursor_word == "" then
+    -- expand("<cword>") raises E348 when no word is under the cursor (empty or
+    -- whitespace-only line), so the error must be caught rather than checked for.
+    local ok, cursor_word = pcall(vim.fn.expand, "<cword>")
+    if not ok or cursor_word == "" then
         vim.notify("No word under cursor", vim.log.levels.WARN)
         return nil
     end
+    ---@cast cursor_word string
 
     local suggestions = vim.fn.spellsuggest(cursor_word, opts.limit or 25)
 
